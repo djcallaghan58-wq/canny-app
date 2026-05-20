@@ -36,6 +36,16 @@ export interface Business {
   phone: string
   owner_id: string
   created_at: string
+  writing_style: WritingStyle | null
+}
+
+export interface WritingStyle {
+  tone: string
+  sentence_length: string
+  greeting_style: string
+  phrases: string[]
+  signature: string
+  summary: string
 }
 
 export interface Lead {
@@ -53,6 +63,8 @@ export interface Lead {
   last_contacted_at: string | null
 }
 
+export type ProspectStatus = 'new' | 'contacted' | 'pipeline' | 'dismissed'
+
 export interface Prospect {
   id: string
   business_id: string
@@ -61,6 +73,8 @@ export interface Prospect {
   contact_title: string
   email: string
   phone: string
+  website: string
+  location: string
   company_overview: string
   email_format: string
   pain_points: string
@@ -69,8 +83,21 @@ export interface Prospect {
   enriched: boolean
   notes: string
   stage: ProspectStage
+  status: ProspectStatus
+  search_query: string
+  source: string
+  dismiss_reason: string
   last_outreach_at: string | null
   value: number
+  created_at: string
+  updated_at: string | null
+}
+
+export interface ProspectSearch {
+  id: string
+  business_id: string
+  query: string
+  results_count: number
   created_at: string
 }
 

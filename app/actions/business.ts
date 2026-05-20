@@ -61,6 +61,7 @@ export async function updateBusiness(input: {
   main_service?: string
   city?: string
   phone?: string
+  writing_style?: object | null
 }): Promise<{ success: boolean; error?: string }> {
   const { userId } = await auth()
   if (!userId) return { success: false, error: 'Not authenticated' }

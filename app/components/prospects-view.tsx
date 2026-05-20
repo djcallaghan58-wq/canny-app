@@ -7,22 +7,31 @@ import {
   Bot, Mail, Plus, Loader2, Copy, Check,
 } from 'lucide-react'
 import { getAccent, getGlow } from '@/lib/supabase'
-import type { Business, Prospect, ProspectStage } from '@/lib/supabase'
+import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/supabase'
 import {
   createProspect, updateProspectStage, updateProspect, importProspects,
+  saveProspectFromSearch, checkRecentSearch, saveSearch, moveToLeadsPipeline,
 } from '@/app/actions/prospects'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ResearchResult {
   company_name: string
+  website: string
+  location: string
   company_overview: string
+  recent_news: string
   decision_maker_name: string
   decision_maker_title: string
   email_format: string
+  linkedin: string
   pain_points: string
   pitch_angle: string
+  best_hook: string
   talking_points: string[]
+  subject_a: string
+  subject_b: string
+  email_body: string
 }
 
 interface DraftEmail { subject: string; body: string }
@@ -442,38 +451,111 @@ function AISearchTab({
   glow: string
   onProspectAdded: (p: Prospect) => void
 }) {
-  const [query,      setQuery]      = useState('')
-  const [searching,  setSearching]  = useState(false)
-  const [result,     setResult]     = useState<ResearchResult | null>(null)
-  const [searchErr,  setSearchErr]  = useState('')
-  const [added,      setAdded]      = useState(false)
-  const [adding,     setAdding]     = useState(false)
-  const [draftEmail, setDraftEmail] = useState<DraftEmail | null>(null)
-  const [drafting,   setDrafting]   = useState(false)
+  const [query,        setQuery]        = useState('')
+  const [searching,    setSearching]    = useState(false)
+  const [result,       setResult]       = useState<ResearchResult | null>(null)
+  const [savedProspect,setSavedProspect]= useState<Prospect | null>(null)
+  const [searchErr,    setSearchErr]    = useState('')
+  const [cachedSearch, setCachedSearch] = useState<ProspectSearch | null>(null)
+  const [addingToLeads,setAddingToLeads]= useState(false)
+  const [addedToLeads, setAddedToLeads] = useState(false)
+  const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
+  const [showEmail,    setShowEmail]    = useState(false)
 
   const pills = quickSearches(business)
 
-  const search = async (q?: string) => {
-    const text = (q ?? query).trim()
+  const runSearch = async (q: string, force = false) => {
+    const text = q.trim()
     if (!text || searching) return
     setQuery(text)
     setSearching(true)
     setResult(null)
+    setSavedProspect(null)
     setSearchErr('')
-    setAdded(false)
+    setCachedSearch(null)
+    setAddedToLeads(false)
+
+    // Check search memory first (unless forcing refresh)
+    if (!force) {
+      const cached = await checkRecentSearch(business.id, text)
+      if (cached.found && cached.search && cached.prospects?.length) {
+        setCachedSearch(cached.search)
+        // Map first saved prospect back to ResearchResult display shape
+        const p = cached.prospects[0]
+        setResult({
+          company_name: p.company_name,
+          website: p.website ?? '',
+          location: p.location ?? '',
+          company_overview: p.company_overview ?? '',
+          recent_news: '',
+          decision_maker_name: p.contact_name ?? '',
+          decision_maker_title: p.contact_title ?? '',
+          email_format: p.email_format ?? '',
+          linkedin: '',
+          pain_points: p.pain_points ?? '',
+          pitch_angle: p.pitch_angle ?? '',
+          best_hook: '',
+          talking_points: parseTalkingPoints(p.talking_points),
+          subject_a: '',
+          subject_b: '',
+          email_body: '',
+        })
+        setSavedProspect(p)
+        setSearching(false)
+        return
+      }
+    }
 
     try {
-      const res = await fetch('/api/prospect/research', {
+      const res = await fetch('/api/research/prospect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: text,
-          business: { name: business.name, industry: business.industry, ideal_customer: business.ideal_customer, main_service: business.main_service, city: business.city },
+          business: {
+            name: business.name, industry: business.industry,
+            ideal_customer: business.ideal_customer, main_service: business.main_service,
+            city: business.city, writing_style: (business as Business & { writing_style?: unknown }).writing_style ?? null,
+          },
         }),
       })
       const data = await res.json()
-      if (data.result) setResult(data.result)
-      else setSearchErr(data.error || 'No results found. Try a more specific company name.')
+      if (data.result) {
+        const r: ResearchResult = data.result
+        setResult(r)
+
+        // Auto-save to prospects table
+        const saved = await saveProspectFromSearch({
+          business_id:      business.id,
+          company_name:     r.company_name,
+          contact_name:     r.decision_maker_name,
+          contact_title:    r.decision_maker_title,
+          email:            r.email_format,
+          website:          r.website,
+          location:         r.location,
+          company_overview: r.company_overview,
+          email_format:     r.email_format,
+          pain_points:      r.pain_points,
+          pitch_angle:      r.pitch_angle,
+          talking_points:   JSON.stringify(r.talking_points),
+          search_query:     text,
+          source:           'ai_search',
+        })
+        if (saved.prospect) {
+          setSavedProspect(saved.prospect)
+          if (!saved.duplicate) onProspectAdded(saved.prospect)
+        }
+
+        // Save to search memory
+        await saveSearch(business.id, text, 1)
+
+        // Pre-populate draft email if subjects returned
+        if (r.subject_a && r.email_body) {
+          setDraftEmail({ subject: r.subject_a, body: r.email_body })
+        }
+      } else {
+        setSearchErr(data.error || 'No results found. Try a more specific company name.')
+      }
     } catch {
       setSearchErr('Search failed. Check your connection and try again.')
     } finally {
@@ -481,49 +563,12 @@ function AISearchTab({
     }
   }
 
-  const addToPipeline = async () => {
-    if (!result || adding) return
-    setAdding(true)
-    const { success, prospect } = await createProspect({
-      business_id:      business.id,
-      company_name:     result.company_name,
-      contact_name:     result.decision_maker_name,
-      contact_title:    result.decision_maker_title,
-      email:            result.email_format,
-      company_overview: result.company_overview,
-      email_format:     result.email_format,
-      pain_points:      result.pain_points,
-      pitch_angle:      result.pitch_angle,
-      talking_points:   JSON.stringify(result.talking_points),
-      enriched:         true,
-      stage:            'Researched',
-    })
-    if (success && prospect) {
-      onProspectAdded(prospect)
-      setAdded(true)
-    }
-    setAdding(false)
-  }
-
-  const draftOutreach = async () => {
-    if (!result || drafting) return
-    setDrafting(true)
-    const mockProspect = {
-      company_name:  result.company_name,
-      contact_name:  result.decision_maker_name,
-      contact_title: result.decision_maker_title,
-      pain_points:   result.pain_points,
-      pitch_angle:   result.pitch_angle,
-      talking_points: JSON.stringify(result.talking_points),
-    }
-    const res = await fetch('/api/prospect/draft-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prospect: mockProspect, business }),
-    })
-    const data = await res.json()
-    if (data.subject) setDraftEmail(data)
-    setDrafting(false)
+  const handleAddToLeadsPipeline = async () => {
+    if (!savedProspect || addingToLeads) return
+    setAddingToLeads(true)
+    const { success } = await moveToLeadsPipeline(savedProspect.id, business.id)
+    if (success) setAddedToLeads(true)
+    setAddingToLeads(false)
   }
 
   const sectionLabel: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#A1A1AA', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 6 }
@@ -549,12 +594,12 @@ function AISearchTab({
             placeholder="Search for a company or prospect..."
             value={query}
             onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && search()}
+            onKeyDown={e => e.key === 'Enter' && runSearch(query)}
             style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: '#09090B', background: 'transparent', padding: '13px 0', fontFamily: 'inherit' }}
           />
         </div>
         <button
-          onClick={() => search()}
+          onClick={() => runSearch(query)}
           disabled={!query.trim() || searching}
           style={{
             padding: '0 22px', borderRadius: 10, border: 'none',
@@ -579,7 +624,7 @@ function AISearchTab({
             {pills.map(pill => (
               <button
                 key={pill}
-                onClick={() => search(pill)}
+                onClick={() => { setQuery(pill); runSearch(pill) }}
                 style={{
                   padding: '6px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 500,
                   border: '1px solid rgba(0,0,0,0.10)', background: '#F4F4F5',
@@ -600,8 +645,8 @@ function AISearchTab({
       {searching && (
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid rgba(0,0,0,0.07)', padding: '32px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.07)' }}>
           <Loader2 size={22} color={accent} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-          <p style={{ fontSize: 14, fontWeight: 600, color: '#09090B', marginBottom: 4 }}>Researching prospect…</p>
-          <p style={{ fontSize: 12.5, color: '#A1A1AA' }}>Searching the web and compiling a research brief</p>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#09090B', marginBottom: 4 }}>Running research pipeline…</p>
+          <p style={{ fontSize: 12.5, color: '#A1A1AA' }}>4 agents searching the web, finding contacts, and drafting your email</p>
         </div>
       )}
 
@@ -617,68 +662,126 @@ function AISearchTab({
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid rgba(0,0,0,0.07)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
           <div style={{ height: 3, background: accent }} />
           <div style={{ padding: '22px 24px' }}>
+
+            {/* Cached search banner */}
+            {cachedSearch && (
+              <div style={{ background: glow, border: `1px solid ${accent}22`, borderRadius: 9, padding: '9px 14px', marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <p style={{ fontSize: 12.5, color: accent, fontWeight: 500 }}>
+                  🕐 Searched {Math.floor((Date.now() - new Date(cachedSearch.created_at).getTime()) / 86400000)} day{Math.floor((Date.now() - new Date(cachedSearch.created_at).getTime()) / 86400000) !== 1 ? 's' : ''} ago — showing saved results
+                </p>
+                <button
+                  onClick={() => runSearch(query, true)}
+                  style={{ fontSize: 12, fontWeight: 600, color: accent, background: 'none', border: `1px solid ${accent}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Refresh
+                </button>
+              </div>
+            )}
+
             {/* Company header */}
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
               <div>
                 <h3 style={{ fontSize: 18, fontWeight: 700, color: '#09090B', letterSpacing: '-0.4px', marginBottom: 3 }}>{result.company_name}</h3>
                 <p style={{ fontSize: 13, color: '#71717A' }}>
                   {result.decision_maker_name && <><strong style={{ color: '#52525B' }}>{result.decision_maker_name}</strong> · {result.decision_maker_title}</>}
+                  {result.location && <span style={{ marginLeft: 8, color: '#A1A1AA' }}>· {result.location}</span>}
                 </p>
+                {result.website && (
+                  <a href={result.website.startsWith('http') ? result.website : `https://${result.website}`} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 12, color: accent, textDecoration: 'none', marginTop: 2, display: 'inline-block' }}>
+                    {result.website} ↗
+                  </a>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: 7, flexShrink: 0 }}>
-                <button
-                  onClick={draftOutreach}
-                  disabled={drafting}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '8px 14px', borderRadius: 8, minHeight: 36,
-                    border: '1.5px solid rgba(0,0,0,0.10)',
-                    background: '#fff', color: '#52525B',
-                    fontSize: 12.5, fontWeight: 600, cursor: drafting ? 'not-allowed' : 'pointer',
-                    fontFamily: 'inherit', transition: 'all 0.15s',
-                  }}
-                >
-                  {drafting ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={12} />}
-                  {drafting ? 'Writing…' : 'Draft Outreach'}
-                </button>
-                <button
-                  onClick={addToPipeline}
-                  disabled={adding || added}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '8px 14px', borderRadius: 8, minHeight: 36,
-                    border: 'none',
-                    background: added ? '#059669' : adding ? '#E4E4E7' : accent,
-                    color: 'white',
-                    fontSize: 12.5, fontWeight: 600, cursor: adding || added ? 'default' : 'pointer',
-                    fontFamily: 'inherit', transition: 'all 0.15s',
-                    boxShadow: adding || added ? 'none' : `0 2px 8px ${glow}`,
-                  }}
-                >
-                  {added ? <><Check size={12} /> Added</> : adding ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <><Plus size={12} /> Add to Pipeline</>}
-                </button>
+              <div style={{ display: 'flex', gap: 7, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {draftEmail && (
+                  <button
+                    onClick={() => setShowEmail(true)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '8px 14px', borderRadius: 8, minHeight: 36,
+                      border: '1.5px solid rgba(0,0,0,0.10)',
+                      background: '#fff', color: '#52525B',
+                      fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'inherit', transition: 'all 0.15s',
+                    }}
+                  >
+                    <Mail size={12} /> View Draft Email
+                  </button>
+                )}
+                {savedProspect ? (
+                  <button
+                    onClick={handleAddToLeadsPipeline}
+                    disabled={addingToLeads || addedToLeads || savedProspect.status === 'pipeline'}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '8px 14px', borderRadius: 8, minHeight: 36,
+                      border: 'none',
+                      background: addedToLeads || savedProspect.status === 'pipeline' ? '#059669' : addingToLeads ? '#E4E4E7' : accent,
+                      color: 'white',
+                      fontSize: 12.5, fontWeight: 600,
+                      cursor: addingToLeads || addedToLeads || savedProspect.status === 'pipeline' ? 'default' : 'pointer',
+                      fontFamily: 'inherit', transition: 'all 0.15s',
+                      boxShadow: addingToLeads || addedToLeads || savedProspect.status === 'pipeline' ? 'none' : `0 2px 8px ${glow}`,
+                    }}
+                  >
+                    {addedToLeads || savedProspect.status === 'pipeline'
+                      ? <><Check size={12} /> In Pipeline</>
+                      : addingToLeads
+                        ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                        : <><Plus size={12} /> Add to Pipeline</>
+                    }
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 12, color: '#A1A1AA', padding: '8px 4px' }}>Saving…</span>
+                )}
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <p style={sectionLabel}>Company Overview</p>
-                <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.7 }}>{result.company_overview}</p>
+            {/* Duplicate notice */}
+            {savedProspect && savedProspect.stage !== 'Researched' && !addedToLeads && savedProspect.status !== 'pipeline' && (
+              <div style={{ background: '#F4F4F5', borderRadius: 8, padding: '8px 12px', marginBottom: 16 }}>
+                <p style={{ fontSize: 12.5, color: '#71717A' }}>✓ Already in your prospect list</p>
               </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {result.company_overview && (
+                <div>
+                  <p style={sectionLabel}>Company Overview</p>
+                  <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.7 }}>{result.company_overview}</p>
+                </div>
+              )}
+              {result.recent_news && (
+                <div>
+                  <p style={sectionLabel}>Recent News</p>
+                  <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.7 }}>{result.recent_news}</p>
+                </div>
+              )}
               {result.email_format && (
                 <div>
                   <p style={sectionLabel}>Email Format</p>
                   <p style={{ fontSize: 13, color: '#52525B', fontFamily: 'monospace' }}>{result.email_format}</p>
                 </div>
               )}
-              <div>
-                <p style={sectionLabel}>Pain Points</p>
-                <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.7 }}>{result.pain_points}</p>
-              </div>
-              <div>
-                <p style={sectionLabel}>Pitch Angle</p>
-                <p style={{ fontSize: 13, color: accent, lineHeight: 1.7, fontWeight: 500 }}>{result.pitch_angle}</p>
-              </div>
+              {result.pain_points && (
+                <div>
+                  <p style={sectionLabel}>Pain Points</p>
+                  <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.7 }}>{result.pain_points}</p>
+                </div>
+              )}
+              {result.pitch_angle && (
+                <div>
+                  <p style={sectionLabel}>Pitch Angle</p>
+                  <p style={{ fontSize: 13, color: accent, lineHeight: 1.7, fontWeight: 500 }}>{result.pitch_angle}</p>
+                </div>
+              )}
+              {result.best_hook && (
+                <div>
+                  <p style={sectionLabel}>Best Hook</p>
+                  <p style={{ fontSize: 13, color: '#09090B', lineHeight: 1.7, fontStyle: 'italic' }}>"{result.best_hook}"</p>
+                </div>
+              )}
               {result.talking_points?.length > 0 && (
                 <div>
                   <p style={sectionLabel}>Talking Points</p>
@@ -692,12 +795,29 @@ function AISearchTab({
                   </div>
                 </div>
               )}
+              {result.subject_a && (
+                <div>
+                  <p style={sectionLabel}>Draft Subject Lines</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ background: '#F4F4F5', borderRadius: 8, padding: '8px 12px' }}>
+                      <p style={{ fontSize: 11, color: '#A1A1AA', marginBottom: 2 }}>Option A</p>
+                      <p style={{ fontSize: 13, color: '#09090B', fontWeight: 500 }}>{result.subject_a}</p>
+                    </div>
+                    {result.subject_b && (
+                      <div style={{ background: '#F4F4F5', borderRadius: 8, padding: '8px 12px' }}>
+                        <p style={{ fontSize: 11, color: '#A1A1AA', marginBottom: 2 }}>Option B</p>
+                        <p style={{ fontSize: 13, color: '#09090B', fontWeight: 500 }}>{result.subject_b}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {draftEmail && <EmailModal email={draftEmail} onClose={() => setDraftEmail(null)} />}
+      {showEmail && draftEmail && <EmailModal email={draftEmail} onClose={() => setShowEmail(false)} />}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

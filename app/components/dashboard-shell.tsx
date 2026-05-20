@@ -5,17 +5,18 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { UserButton } from '@clerk/nextjs'
 import {
-  LayoutGrid, GitBranch, Bot, Building2, Settings, Menu, X,
+  LayoutGrid, GitBranch, Bot, Building2, Settings, Menu, X, Sparkles,
 } from 'lucide-react'
 import { getAccent, getGlow } from '@/lib/supabase'
 import type { Business } from '@/lib/supabase'
 
 const NAV = [
-  { href: '/dashboard',            label: 'Dashboard',    icon: LayoutGrid  },
-  { href: '/dashboard/pipeline',   label: 'Pipeline',     icon: GitBranch   },
-  { href: '/dashboard/agent',      label: 'AI Assistant', icon: Bot         },
-  { href: '/dashboard/prospects',  label: 'Prospects',    icon: Building2   },
-  { href: '/dashboard/settings',   label: 'Settings',     icon: Settings    },
+  { href: '/dashboard',                  label: 'Dashboard',    icon: LayoutGrid  },
+  { href: '/dashboard/pipeline',         label: 'Pipeline',     icon: GitBranch   },
+  { href: '/dashboard/agent',            label: 'AI Assistant', icon: Bot         },
+  { href: '/dashboard/prospects',        label: 'Prospects',    icon: Building2   },
+  { href: '/dashboard/settings',         label: 'Settings',     icon: Settings    },
+  { href: '/dashboard/settings/style',   label: 'Writing Style',icon: Sparkles    },
 ]
 
 export function DashboardShell({
