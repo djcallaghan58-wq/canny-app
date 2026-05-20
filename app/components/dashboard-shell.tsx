@@ -119,7 +119,7 @@ export function DashboardShell({
                 </svg>
               </div>
               <span style={{ fontSize: 15, fontWeight: 700, color: '#09090B', letterSpacing: '-0.4px' }}>
-                TradeCommand
+                Salevo
               </span>
             </div>
           </div>

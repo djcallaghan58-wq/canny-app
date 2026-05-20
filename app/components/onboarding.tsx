@@ -112,7 +112,7 @@ export function OnboardingFlow() {
             </svg>
           </div>
           <span style={{ fontSize: 18, fontWeight: 700, color: '#09090B', letterSpacing: '-0.4px' }}>
-            TradeCommand
+            Salevo
           </span>
         </div>
 
@@ -164,7 +164,7 @@ export function OnboardingFlow() {
               <div>
                 {stepLabel(1)}
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>What's your business called?</h2>
-                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>This is how you'll appear in TradeCommand.</p>
+                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>This is how you'll appear in Salevo.</p>
                 <input
                   autoFocus type="text"
                   placeholder="e.g. Evans Custom Apparel"
@@ -301,7 +301,7 @@ export function OnboardingFlow() {
                     transition: 'all 0.2s',
                   }}
                 >
-                  {loading ? 'Setting up…' : '✓ Launch TradeCommand'}
+                  {loading ? 'Setting up…' : '✓ Launch Salevo'}
                 </button>
               )}
             </div>

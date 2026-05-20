@@ -11,8 +11,8 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "FlowAgent",
-  description: "AI agency platform for blue collar and small businesses",
+  title: "Salevo",
+  description: "AI-powered sales and prospecting platform for small businesses",
 };
 
 export default function RootLayout({

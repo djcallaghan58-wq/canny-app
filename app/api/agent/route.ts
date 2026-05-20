@@ -9,8 +9,8 @@ export async function POST(req: Request) {
 
   const body = await req.json()
 
-  // TradeCommand mode: business object provided
-  // FlowAgent mode: niche + description provided (legacy)
+  // Salevo mode: business object provided
+  // Legacy mode: niche + description provided
   const { messages, business, niche, description } = body
 
   if (!messages?.length) return Response.json({ error: 'Messages required' }, { status: 400 })
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
         business.main_service   ? `Main service/product: ${business.main_service}.` : '',
         `Help the owner capture leads, draft follow-up messages, research prospects, and coach them on closing deals. Be direct and practical. Use → for actions, ⚠ for risks, ✦ for opportunities.`,
       ].filter(Boolean).join(' ')
-    : `You are FlowAgent's AI assistant specializing in ${niche} businesses (${description}). Your role is to help users with pipeline management, prospect research, sales strategy, and outreach copy. Use web search to provide current, accurate information when asked about market data, companies, or recent developments. Be concise and actionable. Use → for key points and ✦ for tips.`
+    : `You are Salevo's AI assistant specializing in ${niche} businesses (${description}). Your role is to help users with pipeline management, prospect research, sales strategy, and outreach copy. Use web search to provide current, accurate information when asked about market data, companies, or recent developments. Be concise and actionable. Use → for key points and ✦ for tips.`
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
