@@ -124,6 +124,14 @@ export function DashboardShell({
             </div>
           </div>
 
+          {/* Center: business name */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: accent }} />
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#52525B' }}>
+              {business.name}
+            </span>
+          </div>
+
           {/* Right: user button */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', width: 'auto', minWidth: 80 }}>
             <UserButton />
