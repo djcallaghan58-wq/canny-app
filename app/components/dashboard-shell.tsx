@@ -132,15 +132,6 @@ export function DashboardShell({
             <span style={{ fontSize: 13, fontWeight: 500, color: '#52525B' }}>
               {business.name}
             </span>
-            <span style={{
-              fontSize: 11, fontWeight: 600,
-              color: accent,
-              background: glow,
-              padding: '2px 8px', borderRadius: 20,
-              border: '1px solid rgba(0,0,0,0.06)',
-            }}>
-              {business.industry ?? business.trade_type}
-            </span>
           </div>
 
           {/* Right: user button */}
