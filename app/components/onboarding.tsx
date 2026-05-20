@@ -6,14 +6,12 @@ import { createBusiness } from '@/app/actions/business'
 
 const ACCENT = '#059669'
 const GLOW   = 'rgba(5,150,105,0.15)'
-
-const STEPS = ['Business', 'Industry', 'Customers', 'Location', 'Phone']
+const STEPS  = ['Business', 'Industry', 'Customer', 'Contact']
 
 type Form = {
   name: string
   industry: string
   ideal_customer: string
-  main_service: string
   city: string
   state: string
   phone: string
@@ -23,23 +21,21 @@ export function OnboardingFlow() {
   const router = useRouter()
   const [step, setStep] = useState(1)
   const [form, setForm] = useState<Form>({
-    name: '', industry: '', ideal_customer: '', main_service: '',
-    city: '', state: '', phone: '',
+    name: '', industry: '', ideal_customer: '', city: '', state: '', phone: '',
   })
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error,   setError]   = useState('')
 
   const canAdvance = () => {
     if (step === 1) return form.name.trim().length > 1
     if (step === 2) return form.industry.trim().length > 0
-    if (step === 3) return form.ideal_customer.trim().length > 0 && form.main_service.trim().length > 0
-    if (step === 4) return form.city.trim().length > 0 && form.state.trim().length > 0
-    if (step === 5) return form.phone.trim().length > 6
+    if (step === 3) return form.ideal_customer.trim().length > 0
+    if (step === 4) return form.city.trim().length > 0 && form.state.trim().length > 0 && form.phone.trim().length > 6
     return false
   }
 
-  const next = () => { if (canAdvance() && step < 5) setStep(s => s + 1) }
-  const back = () => { if (step > 1) setStep(s => s - 1) }
+  const next   = () => { if (canAdvance() && step < 4) setStep(s => s + 1) }
+  const back   = () => { if (step > 1) setStep(s => s - 1) }
 
   const submit = async () => {
     if (!canAdvance() || loading) return
@@ -47,12 +43,12 @@ export function OnboardingFlow() {
     setError('')
 
     const result = await createBusiness({
-      name:           form.name,
-      industry:       form.industry,
-      ideal_customer: form.ideal_customer,
-      main_service:   form.main_service,
-      city:           `${form.city}, ${form.state}`,
-      phone:          form.phone,
+      name:           form.name.trim(),
+      industry:       form.industry.trim(),
+      ideal_customer: form.ideal_customer.trim(),
+      main_service:   '',
+      city:           `${form.city.trim()}, ${form.state.trim()}`,
+      phone:          form.phone.trim(),
     })
 
     if (!result.success) {
@@ -72,16 +68,22 @@ export function OnboardingFlow() {
     transition: 'border-color 0.15s, box-shadow 0.15s',
   }
 
-  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const onFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     e.target.style.borderColor = ACCENT
     e.target.style.boxShadow = `0 0 0 3px ${GLOW}`
     e.target.style.background = '#fff'
   }
-  const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const onBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     e.target.style.borderColor = 'rgba(0,0,0,0.10)'
     e.target.style.boxShadow = 'none'
     e.target.style.background = '#F4F4F5'
   }
+
+  const stepLabel = (n: number) => (
+    <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 6 }}>
+      Step {n} of 4
+    </p>
+  )
 
   return (
     <>
@@ -101,8 +103,7 @@ export function OnboardingFlow() {
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 40 }}>
           <div style={{
-            width: 36, height: 36, borderRadius: 9,
-            background: ACCENT,
+            width: 36, height: 36, borderRadius: 9, background: ACCENT,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: `0 4px 16px ${GLOW}`,
           }}>
@@ -126,16 +127,16 @@ export function OnboardingFlow() {
           {/* Progress bar */}
           <div style={{ height: 3, background: '#F4F4F5' }}>
             <div style={{
-              height: '100%', width: `${(step / 5) * 100}%`,
+              height: '100%', width: `${(step / 4) * 100}%`,
               background: ACCENT, transition: 'width 0.4s ease',
             }} />
           </div>
 
           <div style={{ padding: '32px 32px 28px' }}>
-            {/* Step indicator */}
+            {/* Step dots */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24 }}>
-              {STEPS.map((label, i) => (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {STEPS.map((_, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{
                     width: 22, height: 22, borderRadius: '50%',
                     background: i + 1 <= step ? ACCENT : '#F4F4F5',
@@ -148,13 +149,11 @@ export function OnboardingFlow() {
                         <path d="M2 5L4.5 7.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     ) : (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: i + 1 === step ? 'white' : '#A1A1AA' }}>
-                        {i + 1}
-                      </span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: i + 1 === step ? 'white' : '#A1A1AA' }}>{i + 1}</span>
                     )}
                   </div>
                   {i < STEPS.length - 1 && (
-                    <div style={{ width: 20, height: 1, background: i + 1 < step ? ACCENT : 'rgba(0,0,0,0.08)', transition: 'background 0.3s' }} />
+                    <div style={{ width: 24, height: 1, background: i + 1 < step ? ACCENT : 'rgba(0,0,0,0.08)', transition: 'background 0.3s' }} />
                   )}
                 </div>
               ))}
@@ -163,12 +162,12 @@ export function OnboardingFlow() {
             {/* Step 1 — Business Name */}
             {step === 1 && (
               <div>
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 6 }}>Step 1 of 5</p>
+                {stepLabel(1)}
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>What's your business called?</h2>
                 <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>This is how you'll appear in TradeCommand.</p>
                 <input
                   autoFocus type="text"
-                  placeholder="e.g. Miller's HVAC & Cooling"
+                  placeholder="e.g. Evans Custom Apparel"
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && next()}
@@ -180,9 +179,9 @@ export function OnboardingFlow() {
             {/* Step 2 — Industry */}
             {step === 2 && (
               <div>
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 6 }}>Step 2 of 5</p>
+                {stepLabel(2)}
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>What does your business do?</h2>
-                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>e.g. HVAC, Apparel, Landscaping, Staffing, Roofing</p>
+                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>e.g. HVAC, Apparel, Landscaping, Staffing</p>
                 <input
                   autoFocus type="text"
                   placeholder="e.g. Custom apparel and uniforms"
@@ -194,89 +193,71 @@ export function OnboardingFlow() {
               </div>
             )}
 
-            {/* Step 3 — Ideal Customer + Main Service */}
+            {/* Step 3 — Ideal Customer */}
             {step === 3 && (
               <div>
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 6 }}>Step 3 of 5</p>
-                <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>Tell us about your customers</h2>
-                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>We'll tailor your pipeline and AI responses to your business.</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-                      Who is your ideal customer?
-                    </label>
-                    <input
-                      autoFocus type="text"
-                      placeholder="e.g. Sports teams and local businesses"
-                      value={form.ideal_customer}
-                      onChange={e => setForm(f => ({ ...f, ideal_customer: e.target.value }))}
-                      style={inputStyle} onFocus={onFocus} onBlur={onBlur}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-                      What is your main service or product?
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Custom t-shirts, uniforms, and branded merch"
-                      value={form.main_service}
-                      onChange={e => setForm(f => ({ ...f, main_service: e.target.value }))}
-                      style={inputStyle} onFocus={onFocus} onBlur={onBlur}
-                    />
-                  </div>
-                </div>
+                {stepLabel(3)}
+                <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>Who is your ideal customer?</h2>
+                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>e.g. "Sports teams and businesses needing custom apparel"</p>
+                <input
+                  autoFocus type="text"
+                  placeholder="e.g. Sports teams and local businesses"
+                  value={form.ideal_customer}
+                  onChange={e => setForm(f => ({ ...f, ideal_customer: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && next()}
+                  style={inputStyle} onFocus={onFocus} onBlur={onBlur}
+                />
               </div>
             )}
 
-            {/* Step 4 — Location */}
+            {/* Step 4 — City + Phone */}
             {step === 4 && (
               <div>
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 6 }}>Step 4 of 5</p>
+                {stepLabel(4)}
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>Where are you based?</h2>
-                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>Used for finding local prospects and tailoring outreach.</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {([
-                    { key: 'city'  as const, label: 'City',  placeholder: 'e.g. Phoenix'  },
-                    { key: 'state' as const, label: 'State', placeholder: 'e.g. AZ'       },
-                  ]).map(({ key, label, placeholder }) => (
-                    <div key={key}>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>{label}</label>
+                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>Used for finding local prospects and generating outreach.</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div style={{ flex: 2 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>City</label>
                       <input
-                        type="text" placeholder={placeholder}
-                        value={form[key]}
-                        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                        onKeyDown={e => e.key === 'Enter' && next()}
+                        autoFocus type="text" placeholder="e.g. Omaha"
+                        value={form.city}
+                        onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
                         style={{ ...inputStyle, padding: '11px 14px', fontSize: 14 }}
                         onFocus={onFocus} onBlur={onBlur}
                       />
                     </div>
-                  ))}
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>State</label>
+                      <input
+                        type="text" placeholder="e.g. NE"
+                        value={form.state}
+                        onChange={e => setForm(f => ({ ...f, state: e.target.value }))}
+                        style={{ ...inputStyle, padding: '11px 14px', fontSize: 14 }}
+                        onFocus={onFocus} onBlur={onBlur}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>Phone</label>
+                    <input
+                      type="tel" placeholder="e.g. (402) 555-0123"
+                      value={form.phone}
+                      onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && submit()}
+                      style={{ ...inputStyle, padding: '11px 14px', fontSize: 14 }}
+                      onFocus={onFocus} onBlur={onBlur}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {/* Step 5 — Phone */}
-            {step === 5 && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 6 }}>Step 5 of 5</p>
-                <h2 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px', marginBottom: 6 }}>Business phone number</h2>
-                <p style={{ fontSize: 13.5, color: '#52525B', marginBottom: 24 }}>Used for generating outreach templates and call scripts.</p>
-                <input
-                  autoFocus type="tel"
-                  placeholder="e.g. (602) 555-0123"
-                  value={form.phone}
-                  onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && submit()}
-                  style={inputStyle} onFocus={onFocus} onBlur={onBlur}
-                />
                 {error && (
-                  <p style={{ marginTop: 10, fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {error}</p>
+                  <p style={{ marginTop: 12, fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {error}</p>
                 )}
               </div>
             )}
 
-            {/* Nav buttons */}
+            {/* Nav */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 28 }}>
               <button
                 onClick={back} disabled={step === 1}
@@ -291,7 +272,7 @@ export function OnboardingFlow() {
                 ← Back
               </button>
 
-              {step < 5 ? (
+              {step < 4 ? (
                 <button
                   onClick={next} disabled={!canAdvance()}
                   style={{
