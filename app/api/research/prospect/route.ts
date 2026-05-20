@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { auth } from '@clerk/nextjs/server'
 
-export const maxDuration = 300
+export const maxDuration = 60
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
