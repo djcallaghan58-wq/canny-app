@@ -14,7 +14,7 @@ export default async function DashboardLayout({
 
   const business = await getBusiness()
 
-  if (!business) {
+  if (!business || !business.onboarding_complete) {
     return <OnboardingFlow />
   }
 

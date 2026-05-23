@@ -25,6 +25,12 @@ export type LeadStage =
 
 export type ProspectStage = 'New' | 'Researched' | 'Contacted' | 'Responded' | 'Meeting Set' | 'Closed'
 
+export interface CatalogItem {
+  name: string
+  price: number
+  unit: 'per hour' | 'per job' | 'per unit' | 'per item'
+}
+
 export interface Business {
   id: string
   name: string
@@ -37,6 +43,12 @@ export interface Business {
   owner_id: string
   created_at: string
   writing_style: WritingStyle | null
+  // New onboarding fields
+  service_area: string
+  catalog: CatalogItem[] | null
+  target_customer_type: string
+  customer_types: string[] | null
+  onboarding_complete: boolean
 }
 
 export interface WritingStyle {
