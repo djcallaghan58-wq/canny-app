@@ -17,7 +17,22 @@
       "Bash(gh repo *)",
       "Bash(unzip -q /tmp/gh.zip -d /tmp/gh_cli)",
       "Bash(sudo mv /tmp/gh_cli/gh_2.63.2_macOS_arm64/bin/gh /usr/local/bin/gh)",
-      "Bash(gh --version)"
+      "Bash(gh --version)",
+      "Bash(~/bin/gh auth *)",
+      "Bash(~/bin/gh api *)",
+      "Bash(~/bin/gh repo *)",
+      "Bash(xargs kill -9)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npx vercel *)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/Users/daren/Library/Application Support/com.vercel.cli/auth.json'\\)\\); print\\(d['token']\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('alias',''\\), d.get\\('created',''\\), d.get\\('error',''\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('alias',''\\), d.get\\('oldDeploymentId',''\\)\\)\")",
+      "WebFetch(domain:flowagent-pi.vercel.app)",
+      "Bash(python3 -c ' *)",
+      "Bash(git reset *)",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }
