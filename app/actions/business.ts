@@ -60,24 +60,24 @@ export async function createBusiness(input: {
     const supabase = createAdminClient()
     const { error } = await supabase
       .from('businesses')
-      .insert({
-        name:                 input.name,
-        industry:             input.industry,
-        trade_type:           industryToTradeType(input.industry),
-        city:                 input.city,
-        service_area:         input.service_area ?? '',
-        phone:                input.phone ?? '',
-        catalog:              input.catalog ?? [],
-        target_customer_type:         input.target_customer_type ?? 'Both',
-        customer_types:               input.customer_types ?? [],
-        ideal_customer_description:   input.ideal_customer_description ?? null,
-        business_description:         input.business_description ?? null,
-        writing_style:                input.writing_style ?? null,
-        ideal_customer:               input.ideal_customer ?? '',
-        main_service:         input.main_service ?? '',
-        owner_id:             userId,
-        onboarding_complete:  true,
-      })
+      .upsert({
+        name:                        input.name,
+        industry:                    input.industry,
+        trade_type:                  industryToTradeType(input.industry),
+        city:                        input.city,
+        service_area:                input.service_area ?? '',
+        phone:                       input.phone ?? '',
+        catalog:                     input.catalog ?? [],
+        target_customer_type:        input.target_customer_type ?? 'Both',
+        customer_types:              input.customer_types ?? [],
+        ideal_customer_description:  input.ideal_customer_description ?? null,
+        business_description:        input.business_description ?? null,
+        writing_style:               input.writing_style ?? null,
+        ideal_customer:              input.ideal_customer ?? '',
+        main_service:                input.main_service ?? '',
+        owner_id:                    userId,
+        onboarding_complete:         true,
+      }, { onConflict: 'owner_id' })
 
     if (error) return { success: false, error: error.message }
 
