@@ -102,13 +102,16 @@ export async function createBusiness(input: {
 
       if (biz && !biz.org_id) {
         const clerk = await clerkClient()
-        const org = await clerk.organizations.createOrganization({
+        // Use existing Clerk org if the user already has one
+        const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 1 })
+        const existingOrgId = memberships.data[0]?.organization?.id ?? null
+        const orgId = existingOrgId ?? (await clerk.organizations.createOrganization({
           name: input.name,
           createdBy: userId,
-        })
+        })).id
         await supabase
           .from('businesses')
-          .update({ org_id: org.id })
+          .update({ org_id: orgId })
           .eq('id', biz.id)
       }
     } catch {
@@ -179,13 +182,14 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
     const clerk = await clerkClient()
     let orgId = business.org_id
 
-    // Create org on-demand for businesses that predate org support
+    // Link existing Clerk org or create one on-demand
     if (!orgId) {
-      const org = await clerk.organizations.createOrganization({
+      const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 1 })
+      const existingOrgId = memberships.data[0]?.organization?.id ?? null
+      orgId = existingOrgId ?? (await clerk.organizations.createOrganization({
         name: business.name,
         createdBy: userId,
-      })
-      orgId = org.id
+      })).id
       await supabase.from('businesses').update({ org_id: orgId }).eq('id', business.id)
     }
 
