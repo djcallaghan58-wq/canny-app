@@ -18,9 +18,11 @@ export async function POST(req: Request) {
   const systemPrompt = business
     ? [
         `You are the AI assistant for ${business.name}, based in ${business.city}.`,
-        business.industry       ? `Industry: ${business.industry}.`        : '',
-        business.ideal_customer ? `Ideal customer: ${business.ideal_customer}.` : '',
-        business.main_service   ? `Main service/product: ${business.main_service}.` : '',
+        business.industry                   ? `Industry: ${business.industry}.`                                     : '',
+        business.business_description       ? `About the business: ${business.business_description}.`               : '',
+        business.ideal_customer             ? `Ideal customer: ${business.ideal_customer}.`                         : '',
+        business.ideal_customer_description ? `Ideal customer detail: ${business.ideal_customer_description}.`      : '',
+        business.main_service               ? `Main service/product: ${business.main_service}.`                     : '',
         `Help the owner capture leads, draft follow-up messages, research prospects, and coach them on closing deals. Be direct and practical. Use → for actions, ⚠ for risks, ✦ for opportunities.`,
       ].filter(Boolean).join(' ')
     : `You are Salevo's AI assistant specializing in ${niche} businesses (${description}). Your role is to help users with pipeline management, prospect research, sales strategy, and outreach copy. Use web search to provide current, accurate information when asked about market data, companies, or recent developments. Be concise and actionable. Use → for key points and ✦ for tips.`

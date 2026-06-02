@@ -10,16 +10,21 @@ export async function POST(req: Request) {
   const { prospect, business } = await req.json()
   if (!prospect || !business) return Response.json({ error: 'Missing data' }, { status: 400 })
 
-  const system = `You are a cold email copywriter for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}. Write concise, personalized, non-pushy cold emails that get replies. No buzzwords. Short paragraphs. Max 150 words in the body.`
+  const system = [
+    `You are a cold email copywriter for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}.`,
+    business.business_description       ? ` About the business: ${business.business_description}.`       : '',
+    business.ideal_customer_description ? ` Ideal customer: ${business.ideal_customer_description}.`     : '',
+    ` Write concise, personalized, non-pushy cold emails that get replies. No buzzwords. Short paragraphs. Max 150 words in the body.`,
+  ].join('')
 
   const context = [
     `Write a cold outreach email to:`,
     `Company: ${prospect.company_name}`,
-    prospect.contact_name  ? `Contact: ${prospect.contact_name}, ${prospect.contact_title}` : '',
-    prospect.pain_points   ? `Their pain points: ${prospect.pain_points}` : '',
-    prospect.pitch_angle   ? `Pitch angle: ${prospect.pitch_angle}` : '',
+    prospect.contact_name   ? `Contact: ${prospect.contact_name}, ${prospect.contact_title}` : '',
+    prospect.pain_points    ? `Their pain points: ${prospect.pain_points}` : '',
+    prospect.pitch_angle    ? `Pitch angle: ${prospect.pitch_angle}` : '',
     prospect.talking_points ? `Talking points: ${prospect.talking_points}` : '',
-    business.main_service  ? `Our main service: ${business.main_service}` : '',
+    business.main_service   ? `Our main service: ${business.main_service}` : '',
     ``,
     `Return ONLY valid JSON: { "subject": "...", "body": "..." }`,
   ].filter(Boolean).join('\n')

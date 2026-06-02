@@ -9,6 +9,8 @@ interface Business {
   name: string
   industry: string | null
   ideal_customer: string | null
+  ideal_customer_description: string | null
+  business_description: string | null
   main_service: string | null
   city: string | null
 }
@@ -36,10 +38,19 @@ async function generateTargets(
     ? ` Do NOT include any of these already-saved companies: ${excludeCompanies.slice(0, 30).join(', ')}.`
     : ''
 
+  const targetingSystem = [
+    `You find B2B prospects for ${business.name}`,
+    business.industry             ? `, a ${business.industry} company`                              : '',
+    business.city                 ? ` based in ${business.city}`                                    : '',
+    `.`,
+    business.business_description ? ` About the business: ${business.business_description}.`        : '',
+    ` Use web search to find real, specific companies.`,
+  ].join('')
+
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 512,
-    system: `You find B2B prospects for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}${business.city ? ` based in ${business.city}` : ''}. Use web search to find real, specific companies.`,
+    system: targetingSystem,
     tools: [
       { type: 'web_search_20250305' as const, name: 'web_search' },
       {
@@ -60,7 +71,7 @@ async function generateTargets(
     ],
     messages: [{
       role: 'user',
-      content: `Find exactly 10 specific real companies matching: "${query}". Each should be a good prospect for a business selling ${business.main_service || 'services'} to ${business.ideal_customer || 'businesses'}.${excludeNote} Return exactly 10 specific names.`,
+      content: `Find exactly 10 specific real companies matching: "${query}". Each should be a good prospect for a business selling ${business.main_service || 'services'} to ${business.ideal_customer_description || business.ideal_customer || 'businesses'}.${excludeNote} Return exactly 10 specific names.`,
     }],
   })
 
@@ -84,7 +95,14 @@ async function researchOneProspect(
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
-      system: `You research B2B prospects for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}. Be specific. Use web search, then call return_prospect.`,
+      system: [
+      `You research B2B prospects for ${business.name}`,
+      business.industry                   ? `, a ${business.industry} company`                               : '',
+      `.`,
+      business.business_description       ? ` About the business: ${business.business_description}.`         : '',
+      business.ideal_customer_description ? ` Ideal customer: ${business.ideal_customer_description}.`        : '',
+      ` Be specific. Use web search, then call return_prospect.`,
+    ].join(''),
       tools: [
         { type: 'web_search_20250305' as const, name: 'web_search' },
         {

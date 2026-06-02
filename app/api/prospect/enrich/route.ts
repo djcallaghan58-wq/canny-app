@@ -12,11 +12,13 @@ export async function POST(req: Request) {
 
   const system = [
     `You are a B2B prospecting research agent for ${business.name}`,
-    business.industry       ? `, a ${business.industry} company`        : '',
-    business.city           ? ` based in ${business.city}`              : '',
+    business.industry                   ? `, a ${business.industry} company`                               : '',
+    business.city                       ? ` based in ${business.city}`                                     : '',
     `.`,
-    business.ideal_customer ? ` Target customer: ${business.ideal_customer}.` : '',
-    business.main_service   ? ` Main service/product: ${business.main_service}.` : '',
+    business.business_description       ? ` About the business: ${business.business_description}.`         : '',
+    business.ideal_customer             ? ` Target customer: ${business.ideal_customer}.`                   : '',
+    business.ideal_customer_description ? ` Ideal customer detail: ${business.ideal_customer_description}.` : '',
+    business.main_service               ? ` Main service/product: ${business.main_service}.`                : '',
     ` Research the given company and call return_enrichment with your findings.`,
   ].join('')
 
