@@ -42,6 +42,7 @@ export interface Business {
   phone: string
   owner_id: string
   created_at: string
+  org_id: string | null
   writing_style: WritingStyle | null
   business_description: string | null
   // New onboarding fields

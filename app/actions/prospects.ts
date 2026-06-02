@@ -3,6 +3,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase-server'
+import { resolveBusinessForUser } from '@/lib/resolve-business'
 import type { Prospect, ProspectStage, ProspectStatus, ProspectSearch } from '@/lib/supabase'
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
@@ -97,13 +98,8 @@ export async function saveProspectFromSearch(input: {
   try {
     const supabase = createAdminClient()
 
-    const { data: biz } = await supabase
-      .from('businesses')
-      .select('id')
-      .eq('owner_id', userId)
-      .eq('id', input.business_id)
-      .maybeSingle()
-    if (!biz) return { success: false, error: 'Business not found' }
+    const biz = await resolveBusinessForUser(userId)
+    if (!biz || biz.id !== input.business_id) return { success: false, error: 'Business not found' }
 
     // Dedup check: same company_name + business_id
     const { data: existing } = await supabase
@@ -206,7 +202,7 @@ export async function dismissProspect(
   if (!userId) return { success: false }
   try {
     const supabase = createAdminClient()
-    const { data: biz } = await supabase.from('businesses').select('id').eq('owner_id', userId).maybeSingle()
+    const biz = await resolveBusinessForUser(userId)
     if (!biz) return { success: false }
     await supabase.from('prospects').update({
       status: 'dismissed',
@@ -242,8 +238,8 @@ export async function createProspect(input: {
   if (!userId) return { success: false, error: 'Not authenticated' }
   try {
     const supabase = createAdminClient()
-    const { data: biz } = await supabase.from('businesses').select('id').eq('owner_id', userId).eq('id', input.business_id).maybeSingle()
-    if (!biz) return { success: false, error: 'Business not found' }
+    const biz = await resolveBusinessForUser(userId)
+    if (!biz || biz.id !== input.business_id) return { success: false, error: 'Business not found' }
     const { data, error } = await supabase.from('prospects').insert({ stage: 'New', status: 'new', ...input }).select().single()
     if (error) return { success: false, error: error.message }
     revalidatePath('/dashboard/prospects')
@@ -258,7 +254,7 @@ export async function updateProspectStage(id: string, stage: ProspectStage): Pro
   if (!userId) return { success: false }
   try {
     const supabase = createAdminClient()
-    const { data: biz } = await supabase.from('businesses').select('id').eq('owner_id', userId).maybeSingle()
+    const biz = await resolveBusinessForUser(userId)
     if (!biz) return { success: false }
     const { error } = await supabase.from('prospects').update({ stage, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', biz.id)
     return { success: !error }
@@ -275,7 +271,7 @@ export async function updateProspect(
   if (!userId) return { success: false, error: 'Not authenticated' }
   try {
     const supabase = createAdminClient()
-    const { data: biz } = await supabase.from('businesses').select('id').eq('owner_id', userId).maybeSingle()
+    const biz = await resolveBusinessForUser(userId)
     if (!biz) return { success: false, error: 'Business not found' }
     const { error } = await supabase.from('prospects').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', biz.id)
     if (error) return { success: false, error: error.message }
@@ -294,8 +290,8 @@ export async function importProspects(
   if (!userId) return { success: false, count: 0, error: 'Not authenticated' }
   try {
     const supabase = createAdminClient()
-    const { data: biz } = await supabase.from('businesses').select('id').eq('owner_id', userId).eq('id', businessId).maybeSingle()
-    if (!biz) return { success: false, count: 0, error: 'Business not found' }
+    const biz = await resolveBusinessForUser(userId)
+    if (!biz || biz.id !== businessId) return { success: false, count: 0, error: 'Business not found' }
     const inserts = rows.map(r => ({ ...r, business_id: businessId, stage: 'New' as ProspectStage, status: 'new' as ProspectStatus }))
     const { data, error } = await supabase.from('prospects').insert(inserts).select()
     if (error) return { success: false, count: 0, error: error.message }

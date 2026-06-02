@@ -1,8 +1,9 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth, clerkClient } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase-server'
+import { resolveBusinessForUser } from '@/lib/resolve-business'
 import type { Business, TradeType, CatalogItem, WritingStyle } from '@/lib/supabase'
 
 function industryToTradeType(industry: string): TradeType {
@@ -19,24 +20,34 @@ export async function getBusiness(): Promise<Business | null> {
 
   try {
     const supabase = createAdminClient()
-    const { data, error } = await supabase
+
+    // Owner fast path
+    const { data: owned } = await supabase
       .from('businesses')
       .select('*')
       .eq('owner_id', userId)
       .maybeSingle()
+    if (owned) return owned
 
-    if (error) {
-      console.error('getBusiness:', error.message)
-      return null
-    }
+    // Team member: resolve via Clerk org memberships
+    const clerk = await clerkClient()
+    const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 10 })
+    const orgIds = memberships.data.map((m: { organization: { id: string } }) => m.organization.id)
+    if (orgIds.length === 0) return null
 
-    return data
+    const { data: bizByOrg } = await supabase
+      .from('businesses')
+      .select('*')
+      .in('org_id', orgIds)
+      .maybeSingle()
+
+    return bizByOrg ?? null
   } catch {
     return null
   }
 }
 
-// Full onboarding create
+// Full onboarding create/update
 export async function createBusiness(input: {
   name: string
   industry: string
@@ -81,6 +92,29 @@ export async function createBusiness(input: {
 
     if (error) return { success: false, error: error.message }
 
+    // Create Clerk org for this business if one doesn't exist yet
+    try {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('id, org_id')
+        .eq('owner_id', userId)
+        .maybeSingle()
+
+      if (biz && !biz.org_id) {
+        const clerk = await clerkClient()
+        const org = await clerk.organizations.createOrganization({
+          name: input.name,
+          createdBy: userId,
+        })
+        await supabase
+          .from('businesses')
+          .update({ org_id: org.id })
+          .eq('id', biz.id)
+      }
+    } catch {
+      // Non-critical — app works without org, invite will create it on demand
+    }
+
     revalidatePath('/dashboard')
     return { success: true }
   } catch (e) {
@@ -107,11 +141,14 @@ export async function updateBusiness(input: {
   if (!userId) return { success: false, error: 'Not authenticated' }
 
   try {
+    const biz = await resolveBusinessForUser(userId)
+    if (!biz) return { success: false, error: 'Business not found' }
+
     const supabase = createAdminClient()
     const { error } = await supabase
       .from('businesses')
       .update(input)
-      .eq('owner_id', userId)
+      .eq('id', biz.id)
 
     if (error) return { success: false, error: error.message }
 
@@ -120,5 +157,48 @@ export async function updateBusiness(input: {
     return { success: true }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
+  }
+}
+
+export async function inviteTeamMember(email: string): Promise<{ success: boolean; error?: string }> {
+  const { userId } = await auth()
+  if (!userId) return { success: false, error: 'Not authenticated' }
+
+  try {
+    const supabase = createAdminClient()
+
+    // Must be the business owner to invite
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('id, name, org_id')
+      .eq('owner_id', userId)
+      .maybeSingle()
+
+    if (!business) return { success: false, error: 'Only the business owner can invite team members.' }
+
+    const clerk = await clerkClient()
+    let orgId = business.org_id
+
+    // Create org on-demand for businesses that predate org support
+    if (!orgId) {
+      const org = await clerk.organizations.createOrganization({
+        name: business.name,
+        createdBy: userId,
+      })
+      orgId = org.id
+      await supabase.from('businesses').update({ org_id: orgId }).eq('id', business.id)
+    }
+
+    await clerk.organizations.createOrganizationInvitation({
+      organizationId: orgId,
+      emailAddress: email.trim(),
+      inviterUserId: userId,
+      role: 'basic_member',
+    })
+
+    return { success: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Could not send invitation'
+    return { success: false, error: msg }
   }
 }

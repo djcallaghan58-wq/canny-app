@@ -2,6 +2,7 @@
 
 import { auth } from '@clerk/nextjs/server'
 import { createAdminClient } from '@/lib/supabase-server'
+import { resolveBusinessForUser } from '@/lib/resolve-business'
 import type { Lead, LeadStage } from '@/lib/supabase'
 
 // ─── Briefing ─────────────────────────────────────────────────────────────────
@@ -85,13 +86,7 @@ export async function updateLeadStage(
   try {
     const supabase = createAdminClient()
 
-    // Verify lead belongs to this user's business
-    const { data: biz } = await supabase
-      .from('businesses')
-      .select('id')
-      .eq('owner_id', userId)
-      .maybeSingle()
-
+    const biz = await resolveBusinessForUser(userId)
     if (!biz) return { success: false }
 
     const { error } = await supabase
@@ -122,15 +117,8 @@ export async function createLead(input: {
   try {
     const supabase = createAdminClient()
 
-    // Verify the business_id belongs to this user
-    const { data: biz } = await supabase
-      .from('businesses')
-      .select('id')
-      .eq('owner_id', userId)
-      .eq('id', input.business_id)
-      .maybeSingle()
-
-    if (!biz) return { success: false, error: 'Business not found' }
+    const biz = await resolveBusinessForUser(userId)
+    if (!biz || biz.id !== input.business_id) return { success: false, error: 'Business not found' }
 
     const { data, error } = await supabase
       .from('leads')

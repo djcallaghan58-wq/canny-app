@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Settings } from 'lucide-react'
 import { getAccent, getGlow } from '@/lib/supabase'
 import type { Business } from '@/lib/supabase'
-import { updateBusiness } from '@/app/actions/business'
+import { updateBusiness, inviteTeamMember } from '@/app/actions/business'
 
 const FIELDS = [
   {
@@ -67,6 +67,11 @@ export function SettingsView({ business }: { business: Business }) {
   const [saved,   setSaved]   = useState(false)
   const [error,   setError]   = useState('')
 
+  const [inviteEmail,   setInviteEmail]   = useState('')
+  const [inviting,      setInviting]      = useState(false)
+  const [inviteSuccess, setInviteSuccess] = useState('')
+  const [inviteError,   setInviteError]   = useState('')
+
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '11px 14px',
     background: '#F4F4F5', border: '1.5px solid rgba(0,0,0,0.10)',
@@ -84,6 +89,21 @@ export function SettingsView({ business }: { business: Business }) {
     e.target.style.borderColor = 'rgba(0,0,0,0.10)'
     e.target.style.boxShadow = 'none'
     e.target.style.background = '#F4F4F5'
+  }
+
+  const handleInvite = async () => {
+    if (!inviteEmail.trim() || inviting) return
+    setInviting(true)
+    setInviteSuccess('')
+    setInviteError('')
+    const result = await inviteTeamMember(inviteEmail.trim())
+    setInviting(false)
+    if (result.success) {
+      setInviteSuccess(`Invitation sent to ${inviteEmail.trim()}`)
+      setInviteEmail('')
+    } else {
+      setInviteError(result.error ?? 'Could not send invitation.')
+    }
   }
 
   const handleSave = async () => {
@@ -236,6 +256,54 @@ export function SettingsView({ business }: { business: Business }) {
               </span>
             )}
           </div>
+        </div>
+
+        {/* Team Members */}
+        <div style={{
+          background: '#FFFFFF', border: '1px solid rgba(0,0,0,0.07)',
+          borderRadius: 14, padding: '28px', marginTop: 20,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+        }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 6 }}>
+            Team Members
+          </p>
+          <p style={{ fontSize: 13, color: '#71717A', marginBottom: 20 }}>
+            Invite teammates to collaborate on your pipeline and prospects. They'll see the same data as you.
+          </p>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              type="email"
+              placeholder="teammate@company.com"
+              value={inviteEmail}
+              onChange={e => { setInviteEmail(e.target.value); setInviteSuccess(''); setInviteError('') }}
+              onKeyDown={e => e.key === 'Enter' && handleInvite()}
+              onFocus={onFocus} onBlur={onBlur}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button
+              onClick={handleInvite}
+              disabled={!inviteEmail.trim() || inviting}
+              style={{
+                padding: '10px 20px', borderRadius: 9, border: 'none', flexShrink: 0,
+                background: inviteEmail.trim() && !inviting ? accent : '#E4E4E7',
+                color: 'white', fontSize: 13.5, fontWeight: 600,
+                cursor: inviteEmail.trim() && !inviting ? 'pointer' : 'not-allowed',
+                fontFamily: 'inherit', letterSpacing: '-0.2px',
+                boxShadow: inviteEmail.trim() && !inviting ? `0 2px 10px ${glow}` : 'none',
+                transition: 'all 0.2s', whiteSpace: 'nowrap' as const,
+              }}
+            >
+              {inviting ? 'Sending…' : 'Send Invite'}
+            </button>
+          </div>
+
+          {inviteSuccess && (
+            <p style={{ marginTop: 10, fontSize: 12.5, color: '#059669', fontWeight: 500 }}>✓ {inviteSuccess}</p>
+          )}
+          {inviteError && (
+            <p style={{ marginTop: 10, fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {inviteError}</p>
+          )}
         </div>
       </div>
     </div>
