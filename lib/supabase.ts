@@ -43,11 +43,13 @@ export interface Business {
   owner_id: string
   created_at: string
   writing_style: WritingStyle | null
+  business_description: string | null
   // New onboarding fields
   service_area: string
   catalog: CatalogItem[] | null
   target_customer_type: string
   customer_types: string[] | null
+  ideal_customer_description: string | null
   onboarding_complete: boolean
 }
 

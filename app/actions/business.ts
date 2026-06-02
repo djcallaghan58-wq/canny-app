@@ -46,6 +46,8 @@ export async function createBusiness(input: {
   catalog?: CatalogItem[]
   target_customer_type?: string
   customer_types?: string[]
+  ideal_customer_description?: string
+  business_description?: string
   writing_style?: WritingStyle | null
   // Legacy fields
   ideal_customer?: string
@@ -66,10 +68,12 @@ export async function createBusiness(input: {
         service_area:         input.service_area ?? '',
         phone:                input.phone ?? '',
         catalog:              input.catalog ?? [],
-        target_customer_type: input.target_customer_type ?? 'Both',
-        customer_types:       input.customer_types ?? [],
-        writing_style:        input.writing_style ?? null,
-        ideal_customer:       input.ideal_customer ?? '',
+        target_customer_type:         input.target_customer_type ?? 'Both',
+        customer_types:               input.customer_types ?? [],
+        ideal_customer_description:   input.ideal_customer_description ?? null,
+        business_description:         input.business_description ?? null,
+        writing_style:                input.writing_style ?? null,
+        ideal_customer:               input.ideal_customer ?? '',
         main_service:         input.main_service ?? '',
         owner_id:             userId,
         onboarding_complete:  true,
@@ -95,6 +99,8 @@ export async function updateBusiness(input: {
   catalog?: CatalogItem[]
   target_customer_type?: string
   customer_types?: string[]
+  ideal_customer_description?: string
+  business_description?: string
   writing_style?: object | null
 }): Promise<{ success: boolean; error?: string }> {
   const { userId } = await auth()

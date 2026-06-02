@@ -73,11 +73,13 @@ interface FormState {
   industry: string
   city: string
   service_area: string
+  business_description: string
   // Step 2
   catalog: CatalogItem[]
   // Step 3
   customer_type: CustomerType
   commercial_types: string[]
+  ideal_customer_description: string
   // Step 4
   voice_emails: string
   voice_profile: WritingStyle | null
@@ -90,9 +92,9 @@ export function OnboardingFlow() {
   const router  = useRouter()
   const [step,  setStep]    = useState(1)
   const [form,  setForm]    = useState<FormState>({
-    name: '', industry: '', city: '', service_area: '',
+    name: '', industry: '', city: '', service_area: '', business_description: '',
     catalog: [],
-    customer_type: 'Both', commercial_types: [],
+    customer_type: 'Both', commercial_types: [], ideal_customer_description: '',
     voice_emails: '', voice_profile: null, voice_analyzed: false,
   })
   const [loading,   setLoading]   = useState(false)
@@ -165,14 +167,16 @@ export function OnboardingFlow() {
     setError('')
 
     const result = await createBusiness({
-      name:                 form.name.trim(),
-      industry:             form.industry,
-      city:                 form.city.trim(),
-      service_area:         form.service_area.trim(),
-      catalog:              form.catalog,
-      target_customer_type: form.customer_type,
-      customer_types:       form.commercial_types,
-      writing_style:        form.voice_profile,
+      name:                        form.name.trim(),
+      industry:                    form.industry,
+      city:                        form.city.trim(),
+      service_area:                form.service_area.trim(),
+      business_description:        form.business_description.trim() || undefined,
+      catalog:                     form.catalog,
+      target_customer_type:        form.customer_type,
+      customer_types:              form.commercial_types,
+      ideal_customer_description:  form.ideal_customer_description.trim() || undefined,
+      writing_style:               form.voice_profile,
     })
 
     if (!result.success) {
@@ -298,6 +302,17 @@ export function OnboardingFlow() {
                       />
                     </div>
                   </div>
+                  <div>
+                    <label style={labelStyle}>About Your Business <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: '#A1A1AA' }}>(optional)</span></label>
+                    <textarea
+                      value={form.business_description}
+                      onChange={e => setForm(f => ({ ...f, business_description: e.target.value }))}
+                      rows={3}
+                      placeholder="Tell us about your business — what you do, who you serve, what makes you different."
+                      style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
+                      onFocus={focusIn} onBlur={focusOut}
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -401,7 +416,7 @@ export function OnboardingFlow() {
 
                 {/* Commercial types */}
                 {(form.customer_type === 'Commercial' || form.customer_type === 'Both') && (
-                  <div>
+                  <div style={{ marginBottom: 22 }}>
                     <label style={labelStyle}>What types of commercial customers?</label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {COMMERCIAL_TYPES.map(type => {
@@ -422,6 +437,19 @@ export function OnboardingFlow() {
                     </div>
                   </div>
                 )}
+
+                {/* Free-text ideal customer */}
+                <div>
+                  <label style={labelStyle}>Describe your ideal customer <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: '#A1A1AA' }}>(optional)</span></label>
+                  <textarea
+                    value={form.ideal_customer_description}
+                    onChange={e => setForm(f => ({ ...f, ideal_customer_description: e.target.value }))}
+                    rows={3}
+                    placeholder="Describe your ideal customer in your own words (optional)"
+                    style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
+                    onFocus={focusIn} onBlur={focusOut}
+                  />
+                </div>
               </div>
             )}
 

@@ -8,3 +8,4 @@
 - Match the existing design system exactly — Plus Jakarta Sans, #FAFAFA background, white cards
 - Never change .env.local without asking first
 - When in doubt, ask rather than assume
+- Always deploy to the **salevo** Vercel project (prj_cm783EeKMNh9eAdIxJT6ge5TzhzZ), never flowagent — confirm target is salevo before every deploy

@@ -32,7 +32,8 @@
       "WebFetch(domain:flowagent-pi.vercel.app)",
       "Bash(python3 -c ' *)",
       "Bash(git reset *)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Skill(update-config)"
     ]
   }
 }
