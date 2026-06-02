@@ -61,6 +61,8 @@ export function SettingsView({ business }: { business: Business }) {
     city:           business.city,
     phone:          business.phone,
   })
+  const [businessDescription,       setBusinessDescription]       = useState(business.business_description       ?? '')
+  const [idealCustomerDescription,  setIdealCustomerDescription]  = useState(business.ideal_customer_description ?? '')
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
   const [error,   setError]   = useState('')
@@ -73,12 +75,12 @@ export function SettingsView({ business }: { business: Business }) {
     transition: 'border-color 0.15s, box-shadow 0.15s',
   }
 
-  const onFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     e.target.style.borderColor = accent
     e.target.style.boxShadow = `0 0 0 3px ${glow}`
     e.target.style.background = '#fff'
   }
-  const onBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+  const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     e.target.style.borderColor = 'rgba(0,0,0,0.10)'
     e.target.style.boxShadow = 'none'
     e.target.style.background = '#F4F4F5'
@@ -91,12 +93,14 @@ export function SettingsView({ business }: { business: Business }) {
     setError('')
 
     const result = await updateBusiness({
-      name:           form.name.trim()           || undefined,
-      industry:       form.industry.trim()        || undefined,
-      ideal_customer: form.ideal_customer.trim()  || undefined,
-      main_service:   form.main_service.trim()    || undefined,
-      city:           form.city.trim()            || undefined,
-      phone:          form.phone.trim()           || undefined,
+      name:                        form.name.trim()                      || undefined,
+      industry:                    form.industry.trim()                   || undefined,
+      ideal_customer:              form.ideal_customer.trim()             || undefined,
+      main_service:                form.main_service.trim()               || undefined,
+      city:                        form.city.trim()                       || undefined,
+      phone:                       form.phone.trim()                      || undefined,
+      business_description:        businessDescription.trim()             || undefined,
+      ideal_customer_description:  idealCustomerDescription.trim()        || undefined,
     })
 
     setSaving(false)
@@ -167,6 +171,43 @@ export function SettingsView({ business }: { business: Business }) {
                 />
               </div>
             ))}
+
+            {/* Textarea fields */}
+            <div>
+              <label style={{
+                fontSize: 11, fontWeight: 700, color: '#52525B',
+                letterSpacing: '0.4px', textTransform: 'uppercase',
+                display: 'block', marginBottom: 6,
+              }}>
+                About Your Business
+              </label>
+              <textarea
+                value={businessDescription}
+                onChange={e => setBusinessDescription(e.target.value)}
+                rows={3}
+                placeholder="Tell us about your business — what you do, who you serve, what makes you different."
+                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
+                onFocus={onFocus} onBlur={onBlur}
+              />
+            </div>
+
+            <div>
+              <label style={{
+                fontSize: 11, fontWeight: 700, color: '#52525B',
+                letterSpacing: '0.4px', textTransform: 'uppercase',
+                display: 'block', marginBottom: 6,
+              }}>
+                Ideal Customer Description
+              </label>
+              <textarea
+                value={idealCustomerDescription}
+                onChange={e => setIdealCustomerDescription(e.target.value)}
+                rows={3}
+                placeholder="Describe your ideal customer in your own words."
+                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
+                onFocus={onFocus} onBlur={onBlur}
+              />
+            </div>
           </div>
 
           {error && (
