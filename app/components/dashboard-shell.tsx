@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { UserButton } from '@clerk/nextjs'
 import {
-  LayoutDashboard, Search, GitBranch, List, FileText, Bot, Settings, Menu, X,
+  LayoutDashboard, Search, GitBranch, List, FileText, Bot, BarChart2, Settings, Menu, X,
 } from 'lucide-react'
 import type { Business } from '@/lib/supabase'
 
@@ -41,6 +41,7 @@ const NAV_MAIN: NavEntry[] = [
 const NAV_TOOLS: NavEntry[] = [
   { href: '/dashboard/pipeline',  label: 'Quote Builder', icon: FileText  },
   { href: '/dashboard/agent',     label: 'AI Assistant',  icon: Bot       },
+  { href: '/dashboard/reports',   label: 'Reports',       icon: BarChart2 },
 ]
 
 // ── Component ─────────────────────────────────────────────────────────────────

@@ -60,6 +60,7 @@ export async function createBusiness(input: {
   ideal_customer_description?: string
   business_description?: string
   writing_style?: WritingStyle | null
+  follow_up_schedule?: { first: number; second: number; third: number }
   // Legacy fields
   ideal_customer?: string
   main_service?: string
@@ -84,6 +85,7 @@ export async function createBusiness(input: {
         ideal_customer_description:  input.ideal_customer_description ?? null,
         business_description:        input.business_description ?? null,
         writing_style:               input.writing_style ?? null,
+        follow_up_schedule:          input.follow_up_schedule ?? { first: 3, second: 7, third: 14 },
         ideal_customer:              input.ideal_customer ?? '',
         main_service:                input.main_service ?? '',
         owner_id:                    userId,
@@ -139,6 +141,8 @@ export async function updateBusiness(input: {
   ideal_customer_description?: string
   business_description?: string
   writing_style?: object | null
+  follow_up_schedule?: { first: number; second: number; third: number }
+  reactivation_days?: number
 }): Promise<{ success: boolean; error?: string }> {
   const { userId } = await auth()
   if (!userId) return { success: false, error: 'Not authenticated' }

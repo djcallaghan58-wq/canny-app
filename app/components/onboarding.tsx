@@ -82,6 +82,9 @@ export function OnboardingFlow() {
   const [loading,   setLoading]   = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [error,     setError]     = useState('')
+  const [fuFirst,   setFuFirst]   = useState('3')
+  const [fuSecond,  setFuSecond]  = useState('7')
+  const [fuThird,   setFuThird]   = useState('14')
   const [draft,     setDraft]     = useState<{ name: string; price: string; unit: CatalogItem['unit'] }>({
     name: '', price: '', unit: 'per job',
   })
@@ -146,6 +149,7 @@ export function OnboardingFlow() {
       customer_types:             form.commercial_types,
       ideal_customer_description: form.ideal_customer_description.trim() || undefined,
       writing_style:              form.voice_profile,
+      follow_up_schedule:         { first: Number(fuFirst), second: Number(fuSecond), third: Number(fuThird) },
     })
 
     if (!result.success) {
@@ -419,6 +423,33 @@ export function OnboardingFlow() {
                     style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
                     onFocus={focusIn} onBlur={focusOut}
                   />
+                </div>
+
+                {/* Follow-up schedule */}
+                <div style={{ marginTop: 20, borderTop: `1px solid ${CARD_BORDER}`, paddingTop: 18 }}>
+                  <label style={labelStyle}>
+                    Follow-up Schedule{' '}
+                    <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: MUTED }}>(optional)</span>
+                  </label>
+                  <p style={{ fontSize: 12, color: SECONDARY, marginBottom: 12 }}>Days after last contact before each follow-up reminder.</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {[
+                      { label: '1st', options: ['2', '3', '5'],       val: fuFirst,  set: setFuFirst  },
+                      { label: '2nd', options: ['5', '7', '10'],      val: fuSecond, set: setFuSecond },
+                      { label: '3rd', options: ['10', '14', '21'],    val: fuThird,  set: setFuThird  },
+                    ].map(({ label, options, val, set }) => (
+                      <div key={label}>
+                        <label style={{ ...labelStyle, marginBottom: 4, fontSize: 9.5 }}>{label} follow-up</label>
+                        <select
+                          value={val} onChange={e => set(e.target.value)}
+                          style={{ ...inputStyle, padding: '9px 11px', fontSize: 13, cursor: 'pointer', appearance: 'none' as const }}
+                          onFocus={focusIn} onBlur={focusOut}
+                        >
+                          {options.map(o => <option key={o} value={o}>{o} days</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

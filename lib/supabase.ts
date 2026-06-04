@@ -31,6 +31,12 @@ export interface CatalogItem {
   unit: 'per hour' | 'per job' | 'per unit' | 'per item'
 }
 
+export interface FollowUpSchedule {
+  first:  number   // days after last contact
+  second: number
+  third:  number
+}
+
 export interface Business {
   id: string
   name: string
@@ -52,6 +58,9 @@ export interface Business {
   customer_types: string[] | null
   ideal_customer_description: string | null
   onboarding_complete: boolean
+  // Follow-up & reactivation settings
+  follow_up_schedule: FollowUpSchedule | null
+  reactivation_days: number | null
 }
 
 export interface WritingStyle {

@@ -55,6 +55,15 @@ export function SettingsView({ business }: { business: Business }) {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError,   setInviteError]   = useState('')
 
+  // Follow-up schedule
+  const defaultSched = business.follow_up_schedule ?? { first: 3, second: 7, third: 14 }
+  const [fuFirst,  setFuFirst]  = useState(String(defaultSched.first))
+  const [fuSecond, setFuSecond] = useState(String(defaultSched.second))
+  const [fuThird,  setFuThird]  = useState(String(defaultSched.third))
+  const [reactDays, setReactDays] = useState(String(business.reactivation_days ?? 60))
+  const [savingFu,  setSavingFu]  = useState(false)
+  const [savedFu,   setSavedFu]   = useState(false)
+
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '10px 13px',
     background: DS.inputBg, border: `1.5px solid ${DS.outlineBorder}`,
@@ -107,6 +116,18 @@ export function SettingsView({ business }: { business: Business }) {
     setSaved(true)
     router.refresh()
     setTimeout(() => setSaved(false), 3000)
+  }
+
+  const handleSaveFu = async () => {
+    if (savingFu) return
+    setSavingFu(true); setSavedFu(false)
+    await updateBusiness({
+      follow_up_schedule: { first: Number(fuFirst), second: Number(fuSecond), third: Number(fuThird) },
+      reactivation_days:  Number(reactDays),
+    })
+    setSavingFu(false); setSavedFu(true)
+    router.refresh()
+    setTimeout(() => setSavedFu(false), 3000)
   }
 
   const sectionCard: React.CSSProperties = {
@@ -266,6 +287,79 @@ export function SettingsView({ business }: { business: Business }) {
           {inviteError && (
             <p style={{ marginTop: 10, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {inviteError}</p>
           )}
+        </div>
+
+        {/* Follow-up Schedule */}
+        <div style={{ ...sectionCard, marginTop: 16 }}>
+          <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>
+            Follow-up Schedule
+          </p>
+          <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 18 }}>
+            How many days after last contact before each follow-up is due.
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+            {[
+              { label: '1st Follow-up',  options: ['2', '3', '5'],        val: fuFirst,  set: setFuFirst  },
+              { label: '2nd Follow-up',  options: ['5', '7', '10'],       val: fuSecond, set: setFuSecond },
+              { label: '3rd Follow-up',  options: ['10', '14', '21'],     val: fuThird,  set: setFuThird  },
+            ].map(({ label, options, val, set }) => (
+              <div key={label}>
+                <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
+                  {label}
+                </label>
+                <select
+                  value={val}
+                  onChange={e => set(e.target.value)}
+                  style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' as const }}
+                  onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}`; e.target.style.background = '#fff' }}
+                  onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.boxShadow = 'none'; e.target.style.background = DS.inputBg }}
+                >
+                  {options.map(o => <option key={o} value={o}>{o} days</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ borderTop: `1px solid ${DS.cardBorder}`, paddingTop: 18, marginTop: 4 }}>
+            <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>
+              Reactivation Window
+            </p>
+            <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 10 }}>
+              Flag past customers for a warm reactivation campaign after this many days.
+            </p>
+            <div style={{ maxWidth: 200 }}>
+              <select
+                value={reactDays}
+                onChange={e => setReactDays(e.target.value)}
+                style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' as const }}
+                onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}`; e.target.style.background = '#fff' }}
+                onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.boxShadow = 'none'; e.target.style.background = DS.inputBg }}
+              >
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              onClick={handleSaveFu}
+              disabled={savingFu}
+              style={{
+                padding: '9px 22px', borderRadius: 6, border: 'none',
+                background: savingFu ? '#E4E4E7' : DS.primary,
+                color: 'white', fontSize: 12, fontWeight: 600,
+                cursor: savingFu ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                boxShadow: savingFu ? 'none' : `0 2px 10px ${DS.primaryGlow}`,
+                transition: 'all 0.2s', minHeight: 38,
+              }}
+            >
+              {savingFu ? 'Saving…' : 'Save Schedule'}
+            </button>
+            {savedFu && <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ Saved</span>}
+          </div>
         </div>
       </div>
     </div>

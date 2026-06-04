@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, ChevronLeft, ChevronRight, Bot, X } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Bot, X, Bell } from 'lucide-react'
 import type { Business, Lead, LeadStage } from '@/lib/supabase'
 import { updateLeadStage, createLead } from '@/app/actions/leads'
+import { FollowupsTab } from '@/app/components/followups-tab'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
@@ -391,52 +392,102 @@ export function PipelineView({
     router.push(`/dashboard/agent?prompt=${encodeURIComponent(prompt)}`)
   }
 
+  const [activeTab, setActiveTab] = useState<'pipeline' | 'followups'>('pipeline')
+
   const activeLeads = leads.filter(l => l.stage !== 'Complete')
   const staleCount  = leads.filter(isStale).length
   const totalValue  = activeLeads.reduce((s, l) => s + Number(l.value), 0)
+
+  // Overdue count from leads (computed locally; prospects loaded lazily in FollowupsTab)
+  const sched       = business.follow_up_schedule ?? { first: 3, second: 7, third: 14 }
+  const overdueCount = leads.filter(l => {
+    if (l.stage === 'Complete') return false
+    const elapsed = Date.now() - new Date(l.last_contacted_at ?? l.created_at).getTime()
+    return elapsed >= sched.first * 24 * 60 * 60 * 1000
+  }).length
 
   return (
     <>
       {/* Page header */}
       <div style={{
-        padding: '16px 24px', flexShrink: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '16px 24px 0', flexShrink: 0,
         borderBottom: `1px solid ${DS.cardBorder}`, background: DS.cardBg,
       }}>
-        <div>
-          <p style={{ fontSize: 10.5, fontWeight: 600, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 2 }}>
-            {business.name}
-          </p>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.4px', marginBottom: 2 }}>
-            Pipeline
-          </h1>
-          <p style={{ fontSize: 12.5, color: DS.secondary }}>
-            {leads.length} leads · ${totalValue.toLocaleString()} active
-            {staleCount > 0 && (
-              <span style={{ color: '#DC2626', fontWeight: 600 }}> · {staleCount} need follow-up</span>
-            )}
-          </p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <p style={{ fontSize: 10.5, fontWeight: 600, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 2 }}>
+              {business.name}
+            </p>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.4px', marginBottom: 2 }}>
+              Pipeline
+            </h1>
+            <p style={{ fontSize: 12.5, color: DS.secondary }}>
+              {leads.length} leads · ${totalValue.toLocaleString()} active
+              {staleCount > 0 && (
+                <span style={{ color: '#DC2626', fontWeight: 600 }}> · {staleCount} need follow-up</span>
+              )}
+            </p>
+          </div>
+          {activeTab === 'pipeline' && (
+            <button
+              onClick={() => setShowAdd(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 16px', borderRadius: 6,
+                background: DS.primary, border: 'none', color: 'white',
+                fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'inherit',
+                boxShadow: `0 2px 10px ${DS.primaryGlow}`, minHeight: 36,
+                transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.9' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+            >
+              <Plus size={13} /> Add Lead
+            </button>
+          )}
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 16px', borderRadius: 6,
-            background: DS.primary, border: 'none', color: 'white',
-            fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            fontFamily: 'inherit',
-            boxShadow: `0 2px 10px ${DS.primaryGlow}`, minHeight: 36,
-            transition: 'opacity 0.15s, transform 0.15s',
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.9' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
-        >
-          <Plus size={13} /> Add Lead
-        </button>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 2 }}>
+          {(['pipeline', 'followups'] as const).map(tab => {
+            const active = activeTab === tab
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '8px 14px', borderRadius: '7px 7px 0 0',
+                  border: 'none', background: active ? DS.pageBg : 'transparent',
+                  color: active ? DS.primary : DS.secondary,
+                  fontSize: 12.5, fontWeight: active ? 700 : 500,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  borderBottom: active ? `2px solid ${DS.primary}` : '2px solid transparent',
+                  transition: 'all 0.15s', marginBottom: -1,
+                }}
+              >
+                {tab === 'pipeline' ? 'Pipeline' : (
+                  <>
+                    <Bell size={11} />
+                    Follow-ups
+                    {overdueCount > 0 && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.14)', padding: '1px 6px', borderRadius: 20 }}>
+                        {overdueCount}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
+      {activeTab === 'followups' && <FollowupsTab business={business} />}
+
       {/* Kanban board — horizontal scroll */}
-      <div style={{
+      {activeTab === 'pipeline' && <div style={{
         flex: 1, overflowX: 'auto', overflowY: 'hidden',
         display: 'flex', gap: 10,
         padding: '14px 20px 20px',
@@ -516,7 +567,7 @@ export function PipelineView({
             </div>
           )
         })}
-      </div>
+      </div>}
 
       {showAdd && (
         <AddLeadModal
