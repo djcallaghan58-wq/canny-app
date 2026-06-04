@@ -205,7 +205,7 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
         organizationId: orgId,
         emailAddress: email.trim(),
         inviterUserId: userId,
-        role: 'basic_member',
+        role: 'org:member',
       })
       console.log('[inviteTeamMember] invitation sent successfully')
     } catch (inviteErr) {
@@ -221,7 +221,7 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
           organizationId: orgId,
           emailAddress: email.trim(),
           inviterUserId: userId,
-          role: 'basic_member',
+          role: 'org:member',
         })
         console.log('[inviteTeamMember] retry invitation sent successfully')
       } else {
