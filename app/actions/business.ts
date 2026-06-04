@@ -179,21 +179,26 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
 
     if (!business) return { success: false, error: 'Only the business owner can invite team members.' }
 
+    console.log('[inviteTeamMember] business.id:', business.id, 'stored org_id:', business.org_id)
+
     const clerk = await clerkClient()
 
     // Resolve a valid org ID, refreshing if the stored one is stale (e.g. from dev instance)
     const resolveOrgId = async (): Promise<string> => {
       const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 1 })
       const existingOrgId = memberships.data[0]?.organization?.id ?? null
+      console.log('[inviteTeamMember] resolveOrgId — existingOrgId from Clerk memberships:', existingOrgId)
       const id = existingOrgId ?? (await clerk.organizations.createOrganization({
         name: business.name,
         createdBy: userId,
       })).id
+      console.log('[inviteTeamMember] resolveOrgId — resolved id:', id)
       await supabase.from('businesses').update({ org_id: id }).eq('id', business.id)
       return id
     }
 
     let orgId = business.org_id ?? await resolveOrgId()
+    console.log('[inviteTeamMember] using orgId:', orgId, 'email:', email.trim(), 'inviterUserId:', userId)
 
     try {
       await clerk.organizations.createOrganizationInvitation({
@@ -202,17 +207,23 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
         inviterUserId: userId,
         role: 'basic_member',
       })
+      console.log('[inviteTeamMember] invitation sent successfully')
     } catch (inviteErr) {
-      const msg = inviteErr instanceof Error ? inviteErr.message.toLowerCase() : ''
+      const raw = inviteErr instanceof Error ? inviteErr.message : String(inviteErr)
+      console.error('[inviteTeamMember] createOrganizationInvitation failed:', raw, JSON.stringify(inviteErr))
+      const msg = raw.toLowerCase()
       // Stale org_id (e.g. from dev Clerk instance) — resolve fresh and retry once
       if (msg.includes('not found') || msg.includes('404') || msg.includes('no such')) {
+        console.log('[inviteTeamMember] retrying with fresh orgId')
         orgId = await resolveOrgId()
+        console.log('[inviteTeamMember] retry orgId:', orgId)
         await clerk.organizations.createOrganizationInvitation({
           organizationId: orgId,
           emailAddress: email.trim(),
           inviterUserId: userId,
           role: 'basic_member',
         })
+        console.log('[inviteTeamMember] retry invitation sent successfully')
       } else {
         throw inviteErr
       }
@@ -221,6 +232,7 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
     return { success: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Could not send invitation'
+    console.error('[inviteTeamMember] caught top-level error:', msg, JSON.stringify(e))
     return { success: false, error: msg }
   }
 }
