@@ -184,9 +184,9 @@ export function OnboardingFlow() {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: `0 4px 14px ${GLOW}`,
           }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 8L7 12L13 4" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <span style={{ fontSize: 16, fontWeight: 800, color: 'white', lineHeight: 1, letterSpacing: '-0.5px', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+              S
+            </span>
           </div>
           <span style={{ fontSize: 17, fontWeight: 700, color: BODY_TEXT, letterSpacing: '-0.4px' }}>Salevo</span>
         </div>

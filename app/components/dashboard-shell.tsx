@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { UserButton } from '@clerk/nextjs'
 import {
-  Search, GitBranch, List, FileText, Bot, BarChart2, Settings, Menu, X,
+  LayoutDashboard, Search, GitBranch, List, FileText, Bot, Settings, Menu, X,
 } from 'lucide-react'
 import type { Business } from '@/lib/supabase'
 
@@ -32,6 +32,7 @@ const DS = {
 type NavEntry = { href: string; label: string; icon: React.ElementType }
 
 const NAV_MAIN: NavEntry[] = [
+  { href: '/dashboard',           label: 'Dashboard',     icon: LayoutDashboard },
   { href: '/dashboard/prospects', label: 'AI Search',     icon: Search    },
   { href: '/dashboard/pipeline',  label: 'Pipeline',      icon: GitBranch },
   { href: '/dashboard/prospects', label: 'My Lists',      icon: List      },
@@ -40,7 +41,6 @@ const NAV_MAIN: NavEntry[] = [
 const NAV_TOOLS: NavEntry[] = [
   { href: '/dashboard/pipeline',  label: 'Quote Builder', icon: FileText  },
   { href: '/dashboard/agent',     label: 'AI Assistant',  icon: Bot       },
-  { href: '/dashboard',           label: 'Reports',       icon: BarChart2 },
 ]
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -155,15 +155,16 @@ export function DashboardShell({
               <Menu size={15} />
             </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{
-                width: 22, height: 22, borderRadius: 5,
-                background: 'rgba(255,255,255,0.18)',
+                width: 24, height: 24, borderRadius: 6,
+                background: 'rgba(255,255,255,0.20)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
               }}>
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 8L7 12L13 4" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'white', lineHeight: 1, letterSpacing: '-0.5px', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+                  S
+                </span>
               </div>
               <span style={{ fontSize: 14, fontWeight: 700, color: 'white', letterSpacing: '-0.3px' }}>
                 Salevo

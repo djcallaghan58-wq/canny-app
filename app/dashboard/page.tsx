@@ -1,12 +1,12 @@
 import { getBusiness } from '@/app/actions/business'
-import { getBriefingData } from '@/app/actions/leads'
-import { BriefingView } from '@/app/components/briefing-view'
+import { getWelcomeData } from '@/app/actions/welcome'
+import { WelcomeView } from '@/app/components/welcome-view'
 
 export default async function DashboardHome() {
   const business = await getBusiness()
-  if (!business) return null // layout handles the no-business case
+  if (!business) return null
 
-  const data = await getBriefingData(business.id)
+  const data = await getWelcomeData(business.id)
 
-  return <BriefingView business={business} data={data} />
+  return <WelcomeView business={business} data={data} />
 }
