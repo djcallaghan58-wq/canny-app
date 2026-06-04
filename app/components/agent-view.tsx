@@ -2,27 +2,36 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Bot, Send } from 'lucide-react'
-import { getAccent, getGlow } from '@/lib/supabase'
 import type { Business } from '@/lib/supabase'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Message {
-  role: 'user' | 'agent'
-  content: string
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const DS = {
+  pageBg:       '#F7F9F8',
+  cardBg:       '#FFFFFF',
+  cardBorder:   '#E0EBE5',
+  bodyText:     '#085041',
+  secondary:    '#6B8C7E',
+  muted:        '#9FD4C0',
+  primary:      '#1D9E75',
+  primaryGlow:  'rgba(29,158,117,0.15)',
+  accentLight:  '#E1F5EE',
+  accentMid:    '#F0F7F4',
+  outlineBorder:'#C2D6CC',
+  outlineText:  '#4A7A6A',
+  inputBg:      '#F7F9F8',
 }
 
-interface HistoryEntry {
-  role: 'user' | 'assistant'
-  content: string
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+interface Message { role: 'user' | 'agent'; content: string }
+interface HistoryEntry { role: 'user' | 'assistant'; content: string }
 
-function fmt(text: string, accent: string) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmt(text: string) {
   return text.split('\n').map((line, i) => {
     if (line.startsWith('→'))
-      return <p key={i} style={{ color: accent, margin: '3px 0', fontWeight: 500 }}>{line}</p>
+      return <p key={i} style={{ color: DS.primary, margin: '3px 0', fontWeight: 500 }}>{line}</p>
     if (line.startsWith('⚠'))
       return <p key={i} style={{ color: '#DC2626', margin: '3px 0', fontWeight: 500 }}>{line}</p>
     if (line.startsWith('✦'))
@@ -33,7 +42,7 @@ function fmt(text: string, accent: string) {
   })
 }
 
-// ─── Agent view ───────────────────────────────────────────────────────────────
+// ── Agent view ────────────────────────────────────────────────────────────────
 
 export function AgentView({
   business,
@@ -42,9 +51,6 @@ export function AgentView({
   business: Business
   initialPrompt?: string
 }) {
-  const accent = getAccent(business.trade_type)
-  const glow   = getGlow(business.trade_type)
-
   const welcome = [
     `Ready to help ${business.name}.`,
     '',
@@ -64,16 +70,13 @@ export function AgentView({
   const [history,   setHistory]   = useState<HistoryEntry[]>([])
   const [input,     setInput]     = useState('')
   const [thinking,  setThinking]  = useState(false)
-  const endRef        = useRef<HTMLDivElement>(null)
+  const endRef         = useRef<HTMLDivElement>(null)
   const hasSentInitial = useRef(false)
-  const textareaRef   = useRef<HTMLTextAreaElement>(null)
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, thinking])
 
-  // Auto-send coach prompt from pipeline page
   useEffect(() => {
     if (initialPrompt && !hasSentInitial.current) {
       hasSentInitial.current = true
@@ -98,14 +101,10 @@ export function AgentView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newHistory,
-          business: {
-            name:       business.name,
-            trade_type: business.trade_type,
-            city:       business.city,
-          },
+          business: { name: business.name, trade_type: business.trade_type, city: business.city },
         }),
       })
-      const data = await res.json()
+      const data  = await res.json()
       const reply = data.reply || 'Something went wrong. Try again.'
       setMessages(prev => [...prev, { role: 'agent', content: reply }])
       setHistory(prev => [...prev, { role: 'assistant', content: reply }])
@@ -117,10 +116,7 @@ export function AgentView({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
   return (
@@ -128,38 +124,38 @@ export function AgentView({
 
       {/* Page header */}
       <div style={{
-        padding: '20px 28px 16px', flexShrink: 0,
-        borderBottom: '1px solid rgba(0,0,0,0.07)',
-        background: '#FFFFFF',
-        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 24px 12px', flexShrink: 0,
+        borderBottom: `1px solid ${DS.cardBorder}`,
+        background: DS.cardBg,
+        display: 'flex', alignItems: 'center', gap: 10,
       }}>
         <div style={{
-          width: 36, height: 36, borderRadius: 10,
-          background: glow, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
+          width: 32, height: 32, borderRadius: 9,
+          background: DS.accentLight,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         }}>
-          <Bot size={18} color={accent} />
+          <Bot size={16} color={DS.primary} />
         </div>
         <div>
-          <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 2 }}>
+          <p style={{ fontSize: 10, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 1 }}>
             {business.name}
           </p>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: '#09090B', letterSpacing: '-0.4px', lineHeight: 1 }}>
+          <h1 style={{ fontSize: 16, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.3px', lineHeight: 1 }}>
             AI Assistant
           </h1>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22C55E', display: 'inline-block', animation: 'pulse 2s infinite' }} />
-          <span style={{ fontSize: 12, color: '#71717A', fontWeight: 500 }}>Web search enabled</span>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: DS.primary, display: 'inline-block', animation: 'pulse 2s infinite' }} />
+          <span style={{ fontSize: 11.5, color: DS.secondary, fontWeight: 500 }}>Web search enabled</span>
         </div>
       </div>
 
       {/* Quick commands */}
       <div style={{
-        padding: '12px 28px', flexShrink: 0,
-        display: 'flex', gap: 8, flexWrap: 'wrap',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: '#FFFFFF',
+        padding: '10px 24px', flexShrink: 0,
+        display: 'flex', gap: 7, flexWrap: 'wrap',
+        borderBottom: `1px solid ${DS.cardBorder}`,
+        background: DS.cardBg,
       }}>
         {quickCmds.map(cmd => (
           <button
@@ -167,26 +163,24 @@ export function AgentView({
             disabled={thinking}
             onClick={() => send(cmd)}
             style={{
-              padding: '6px 14px', borderRadius: 20,
-              border: '1px solid rgba(0,0,0,0.10)',
-              background: '#FAFAFA', color: '#52525B',
-              fontSize: 12, fontWeight: 500,
+              padding: '5px 12px', borderRadius: 20,
+              border: `1px solid ${DS.outlineBorder}`,
+              background: DS.accentLight, color: DS.outlineText,
+              fontSize: 11.5, fontWeight: 500,
               cursor: thinking ? 'not-allowed' : 'pointer',
               fontFamily: 'inherit', transition: 'all 0.15s',
               opacity: thinking ? 0.4 : 1,
-              whiteSpace: 'nowrap', minHeight: 32,
+              whiteSpace: 'nowrap',
             }}
             onMouseEnter={e => {
               if (!thinking) {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = accent
-                ;(e.currentTarget as HTMLButtonElement).style.color = accent
-                ;(e.currentTarget as HTMLButtonElement).style.background = glow
+                (e.currentTarget as HTMLButtonElement).style.borderColor = DS.primary
+                ;(e.currentTarget as HTMLButtonElement).style.color       = DS.primary
               }
             }}
             onMouseLeave={e => {
-              ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,0,0,0.10)'
-              ;(e.currentTarget as HTMLButtonElement).style.color = '#52525B'
-              ;(e.currentTarget as HTMLButtonElement).style.background = '#FAFAFA'
+              ;(e.currentTarget as HTMLButtonElement).style.borderColor = DS.outlineBorder
+              ;(e.currentTarget as HTMLButtonElement).style.color       = DS.outlineText
             }}
           >
             {cmd}
@@ -196,66 +190,62 @@ export function AgentView({
 
       {/* Messages */}
       <div style={{
-        flex: 1, overflowY: 'auto', padding: '20px 28px',
-        display: 'flex', flexDirection: 'column', gap: 14,
-        scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent',
+        flex: 1, overflowY: 'auto', padding: '18px 24px',
+        display: 'flex', flexDirection: 'column', gap: 12,
+        scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`,
+        background: DS.pageBg,
       }}>
         {messages.map((m, i) => (
           <div
             key={i}
             style={{
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'flex', flexDirection: 'column',
               alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '78%',
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
               animation: 'slideUp 0.22s ease-out',
             }}
           >
-            <span style={{
-              fontSize: 10, fontWeight: 600, color: '#A1A1AA',
-              letterSpacing: '0.4px', textTransform: 'uppercase', marginBottom: 5,
-            }}>
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: DS.muted, letterSpacing: '0.4px', textTransform: 'uppercase', marginBottom: 4 }}>
               {m.role === 'user' ? 'You' : 'AI Assistant'}
             </span>
             <div style={{
-              padding: '12px 16px', borderRadius: 14, fontSize: 13, lineHeight: 1.65,
+              padding: '11px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.65,
               ...(m.role === 'user'
                 ? {
-                    background: accent,
-                    color: 'white',
-                    borderBottomRightRadius: 4,
-                    boxShadow: `0 2px 10px ${glow}`,
+                    background:            DS.primary,
+                    color:                 'white',
+                    borderBottomRightRadius: 3,
+                    boxShadow:             `0 2px 10px ${DS.primaryGlow}`,
                   }
                 : {
-                    background: '#FFFFFF',
-                    color: '#09090B',
-                    border: '1px solid rgba(0,0,0,0.08)',
-                    borderBottomLeftRadius: 4,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
+                    background:           DS.cardBg,
+                    color:                DS.bodyText,
+                    border:               `1px solid ${DS.cardBorder}`,
+                    borderBottomLeftRadius: 3,
+                    boxShadow:            '0 1px 3px rgba(0,0,0,0.05)',
                   }),
             }}>
-              {m.role === 'agent' ? fmt(m.content, accent) : m.content}
+              {m.role === 'agent' ? fmt(m.content) : m.content}
             </div>
           </div>
         ))}
 
-        {/* Typing indicator */}
         {thinking && (
           <div style={{
             alignSelf: 'flex-start',
             display: 'flex', alignItems: 'center', gap: 5,
-            padding: '12px 16px',
-            background: '#FFFFFF',
-            border: '1px solid rgba(0,0,0,0.08)',
-            borderRadius: 14, borderBottomLeftRadius: 4,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
+            padding: '11px 14px',
+            background: DS.cardBg,
+            border: `1px solid ${DS.cardBorder}`,
+            borderRadius: 12, borderBottomLeftRadius: 3,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
             animation: 'slideUp 0.2s ease-out',
           }}>
             {[0, 1, 2].map(i => (
               <div key={i} style={{
                 width: 5, height: 5, borderRadius: '50%',
-                background: '#A1A1AA',
+                background: DS.muted,
                 animation: `typingDot 1.3s infinite ${i * 0.2}s`,
               }} />
             ))}
@@ -267,44 +257,44 @@ export function AgentView({
 
       {/* Input dock */}
       <div style={{
-        padding: '12px 28px 16px', flexShrink: 0,
-        background: '#FFFFFF',
-        borderTop: '1px solid rgba(0,0,0,0.07)',
+        padding: '10px 24px 14px', flexShrink: 0,
+        background: DS.cardBg,
+        borderTop: `1px solid ${DS.cardBorder}`,
       }}>
-        <div style={{
-          display: 'flex', gap: 10, alignItems: 'flex-end',
-          background: '#F4F4F5',
-          border: '1.5px solid rgba(0,0,0,0.10)',
-          borderRadius: 12, padding: '10px 14px',
-          transition: 'border-color 0.15s, box-shadow 0.15s',
-        }}
+        <div
+          style={{
+            display: 'flex', gap: 10, alignItems: 'flex-end',
+            background: DS.inputBg,
+            border: `1.5px solid ${DS.outlineBorder}`,
+            borderRadius: 10, padding: '9px 12px',
+            transition: 'border-color 0.15s, box-shadow 0.15s',
+          }}
           onFocusCapture={e => {
             const wrap = e.currentTarget as HTMLDivElement
-            wrap.style.borderColor = accent
-            wrap.style.boxShadow = `0 0 0 3px ${glow}`
-            wrap.style.background = '#fff'
+            wrap.style.borderColor = DS.primary
+            wrap.style.boxShadow   = `0 0 0 3px ${DS.primaryGlow}`
+            wrap.style.background  = '#fff'
           }}
           onBlurCapture={e => {
             const wrap = e.currentTarget as HTMLDivElement
             if (!wrap.contains(e.relatedTarget as Node)) {
-              wrap.style.borderColor = 'rgba(0,0,0,0.10)'
-              wrap.style.boxShadow = 'none'
-              wrap.style.background = '#F4F4F5'
+              wrap.style.borderColor = DS.outlineBorder
+              wrap.style.boxShadow   = 'none'
+              wrap.style.background  = DS.inputBg
             }
           }}
         >
           <textarea
-            ref={textareaRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Ask about ${business.trade_type.toLowerCase()} jobs, prospects, follow-ups…`}
+            placeholder={`Ask about jobs, prospects, follow-ups…`}
             disabled={thinking}
             rows={1}
             style={{
               flex: 1, background: 'transparent', border: 'none',
               outline: 'none', resize: 'none', fontSize: 13.5,
-              color: '#09090B', fontFamily: 'inherit',
+              color: DS.bodyText, fontFamily: 'inherit',
               lineHeight: 1.55, maxHeight: 120,
               opacity: thinking ? 0.5 : 1,
             }}
@@ -313,17 +303,17 @@ export function AgentView({
             onClick={() => send()}
             disabled={!input.trim() || thinking}
             style={{
-              width: 34, height: 34, borderRadius: 8, border: 'none',
-              background: input.trim() && !thinking ? accent : '#D4D4D8',
+              width: 32, height: 32, borderRadius: 7, border: 'none',
+              background: input.trim() && !thinking ? DS.primary : DS.muted,
               color: 'white', cursor: input.trim() && !thinking ? 'pointer' : 'not-allowed',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0, transition: 'background 0.15s',
             }}
           >
-            <Send size={14} />
+            <Send size={13} />
           </button>
         </div>
-        <p style={{ fontSize: 10.5, color: '#C4C4C8', marginTop: 8, textAlign: 'center', fontWeight: 500 }}>
+        <p style={{ fontSize: 10, color: DS.muted, marginTop: 6, textAlign: 'center', fontWeight: 500 }}>
           Powered by Claude · Web search enabled · Press Enter to send
         </p>
       </div>

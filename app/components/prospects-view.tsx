@@ -6,73 +6,60 @@ import {
   Search, Upload, GitBranch, X, ChevronLeft, ChevronRight,
   Bot, Mail, Plus, Loader2, Copy, Check,
 } from 'lucide-react'
-import { getAccent, getGlow } from '@/lib/supabase'
 import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/supabase'
 import {
   createProspect, updateProspectStage, updateProspect, importProspects,
   saveProspectFromSearch, checkRecentSearch, saveSearch, moveToLeadsPipeline,
 } from '@/app/actions/prospects'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ResearchResult {
-  company_name: string
-  website: string
-  location: string
-  company_overview: string
-  recent_news: string
-  decision_maker_name: string
-  decision_maker_title: string
-  email_format: string
-  linkedin: string
-  pain_points: string
-  pitch_angle: string
-  best_hook: string
-  talking_points: string[]
-  subject_a: string
-  subject_b: string
-  email_body: string
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const DS = {
+  pageBg:        '#F7F9F8',
+  cardBg:        '#FFFFFF',
+  cardBorder:    '#E0EBE5',
+  cardHover:     '#1D9E75',
+  bodyText:      '#085041',
+  secondary:     '#6B8C7E',
+  muted:         '#9FD4C0',
+  primary:       '#1D9E75',
+  primaryGlow:   'rgba(29,158,117,0.15)',
+  accentLight:   '#E1F5EE',
+  accentMid:     '#F0F7F4',
+  outlineBorder: '#C2D6CC',
+  outlineText:   '#4A7A6A',
+  inputBg:       '#F7F9F8',
+  headerBg:      '#0F6E56',
 }
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 interface BatchResult {
-  company_name: string
-  website: string
-  location: string
-  overview: string
-  contact_name: string
-  contact_title: string
-  email_format: string
-  pain_points: string
-  pitch_angle: string
-  email_subject: string
-  email_body: string
+  company_name: string; website: string; location: string; overview: string
+  contact_name: string; contact_title: string; email_format: string
+  pain_points: string; pitch_angle: string; email_subject: string; email_body: string
 }
 
 interface DraftEmail { subject: string; body: string }
 
 interface CsvRow {
-  company_name: string
-  contact_name: string
-  contact_title: string
-  email: string
-  phone: string
-  notes: string
+  company_name: string; contact_name: string; contact_title: string
+  email: string; phone: string; notes: string
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const STAGES: ProspectStage[] = ['New', 'Researched', 'Contacted', 'Responded', 'Meeting Set', 'Closed']
 
 const STAGE_STYLE: Record<ProspectStage, { color: string; bg: string }> = {
-  'New':          { color: '#71717A', bg: '#F4F4F5' },
-  'Researched':   { color: '#0891B2', bg: 'rgba(8,145,178,0.10)' },
-  'Contacted':    { color: '#F59E0B', bg: 'rgba(245,158,11,0.10)' },
-  'Responded':    { color: '#7C3AED', bg: 'rgba(124,58,237,0.10)' },
-  'Meeting Set':  { color: '#059669', bg: 'rgba(5,150,105,0.10)' },
-  'Closed':       { color: '#16A34A', bg: 'rgba(22,163,74,0.12)' },
+  'New':         { color: DS.secondary, bg: DS.accentMid    },
+  'Researched':  { color: '#0891B2',    bg: 'rgba(8,145,178,0.10)'   },
+  'Contacted':   { color: '#F59E0B',    bg: 'rgba(245,158,11,0.10)'  },
+  'Responded':   { color: '#7C3AED',    bg: 'rgba(124,58,237,0.10)'  },
+  'Meeting Set': { color: DS.primary,   bg: DS.accentLight  },
+  'Closed':      { color: '#16A34A',    bg: 'rgba(22,163,74,0.12)'   },
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseTalkingPoints(raw: string): string[] {
   if (!raw) return []
@@ -83,13 +70,9 @@ function parseTalkingPoints(raw: string): string[] {
 function parseCSV(text: string): CsvRow[] {
   const lines = text.trim().split('\n').filter(Boolean)
   if (lines.length < 2) return []
-
   const headers = lines[0].split(',').map(h =>
-    h.replace(/"/g, '').trim().toLowerCase()
-      .replace(/\s+/g, '_')
-      .replace(/[^a-z_]/g, '')
+    h.replace(/"/g, '').trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, '')
   )
-
   return lines.slice(1).map(line => {
     const vals: string[] = []
     let cur = '', inQ = false
@@ -99,16 +82,14 @@ function parseCSV(text: string): CsvRow[] {
       else { cur += ch }
     }
     vals.push(cur.trim())
-
     const row: Record<string, string> = {}
     headers.forEach((h, i) => { row[h] = (vals[i] ?? '').replace(/^"|"$/g, '') })
-
     return {
       company_name:  row['company_name'] || row['company'] || '',
       contact_name:  row['contact_name'] || row['name']    || row['contact'] || '',
       contact_title: row['contact_title']|| row['title']   || row['job_title'] || '',
       email:         row['email']        || '',
-      phone: row['phone']        || row['phone'] || '',
+      phone:         row['phone']        || '',
       notes:         row['notes']        || '',
     }
   }).filter(r => r.company_name)
@@ -127,7 +108,14 @@ function quickSearches(business: Business): string[] {
   return out.slice(0, 4)
 }
 
-// ─── Draft Email Modal ────────────────────────────────────────────────────────
+function getInitials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean)
+  if (!words.length) return '?'
+  if (words.length === 1) return words[0][0].toUpperCase()
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase()
+}
+
+// ── Draft Email Modal ─────────────────────────────────────────────────────────
 
 function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
@@ -141,68 +129,60 @@ function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(9,9,11,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 16 }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.4)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 16 }}
       onClick={onClose}
     >
       <div
-        style={{ background: '#fff', borderRadius: 16, padding: 28, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.14)', border: '1px solid rgba(0,0,0,0.06)', maxHeight: '85vh', overflowY: 'auto' }}
+        style={{ background: DS.cardBg, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.12)', border: `1px solid ${DS.cardBorder}`, maxHeight: '85vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Mail size={16} color="#52525B" />
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#09090B' }}>Draft Outreach Email</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Mail size={15} color={DS.secondary} />
+            <span style={{ fontSize: 15, fontWeight: 700, color: DS.bodyText }}>Draft Outreach Email</span>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A1A1AA', padding: 4 }}>
-            <X size={16} />
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.muted, padding: 4 }}>
+            <X size={15} />
           </button>
         </div>
 
-        <div style={{ background: '#F4F4F5', borderRadius: 9, padding: '10px 14px', marginBottom: 12 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject</p>
-          <p style={{ fontSize: 13.5, color: '#09090B', fontWeight: 500 }}>{email.subject}</p>
+        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 10 }}>
+          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject</p>
+          <p style={{ fontSize: 13, color: DS.bodyText, fontWeight: 500 }}>{email.subject}</p>
         </div>
 
-        <div style={{ background: '#F4F4F5', borderRadius: 9, padding: '10px 14px', marginBottom: 20 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: '#A1A1AA', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 8 }}>Body</p>
-          <p style={{ fontSize: 13, color: '#09090B', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{email.body}</p>
+        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 18 }}>
+          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 7 }}>Body</p>
+          <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{email.body}</p>
         </div>
 
         <button
           onClick={copy}
           style={{
             display: 'flex', alignItems: 'center', gap: 7,
-            width: '100%', padding: '10px 18px', borderRadius: 9,
-            background: copied ? '#059669' : '#09090B',
-            border: 'none', color: 'white', fontSize: 13.5, fontWeight: 600,
+            width: '100%', padding: '9px 16px', borderRadius: 8,
+            background: copied ? DS.primary : DS.bodyText,
+            border: 'none', color: 'white', fontSize: 13, fontWeight: 600,
             cursor: 'pointer', justifyContent: 'center', fontFamily: 'inherit',
-            transition: 'background 0.2s', minHeight: 44,
+            transition: 'background 0.2s', minHeight: 40,
           }}
         >
-          {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy to Clipboard</>}
+          {copied ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy to Clipboard</>}
         </button>
       </div>
     </div>
   )
 }
 
-// ─── Prospect Detail Slide-Over ───────────────────────────────────────────────
+// ── Prospect Detail Slide-Over ────────────────────────────────────────────────
 
 function ProspectDetail({
-  prospect,
-  business,
-  onClose,
-  onUpdate,
+  prospect, business, onClose, onUpdate,
 }: {
-  prospect: Prospect
-  business: Business
-  onClose: () => void
-  onUpdate: (p: Prospect) => void
+  prospect: Prospect; business: Business; onClose: () => void; onUpdate: (p: Prospect) => void
 }) {
   const router = useRouter()
-  const accent = getAccent(business.trade_type)
-  const glow   = getGlow(business.trade_type)
-  const tps    = parseTalkingPoints(prospect.talking_points)
+  const tps = parseTalkingPoints(prospect.talking_points)
 
   const [notes,        setNotes]        = useState(prospect.notes)
   const [savingNotes,  setSavingNotes]  = useState(false)
@@ -241,92 +221,86 @@ function ProspectDetail({
     const prompt = [
       `Help me with this prospect:`,
       `Company: ${prospect.company_name}`,
-      prospect.contact_name  ? `Contact: ${prospect.contact_name}, ${prospect.contact_title}` : '',
+      prospect.contact_name ? `Contact: ${prospect.contact_name}, ${prospect.contact_title}` : '',
       `Stage: ${stage}`,
-      prospect.pain_points   ? `Pain points: ${prospect.pain_points}` : '',
-      prospect.pitch_angle   ? `Pitch angle: ${prospect.pitch_angle}` : '',
+      prospect.pain_points  ? `Pain points: ${prospect.pain_points}` : '',
+      prospect.pitch_angle  ? `Pitch angle: ${prospect.pitch_angle}` : '',
       `\nWhat's my best next move to advance this deal?`,
     ].filter(Boolean).join('\n')
     router.push(`/dashboard/agent?prompt=${encodeURIComponent(prompt)}`)
   }
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: 10, fontWeight: 700, color: '#A1A1AA',
+  const lbl: React.CSSProperties = {
+    fontSize: 9.5, fontWeight: 700, color: DS.muted,
     letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5,
   }
 
   return (
     <>
-      {/* Overlay */}
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(9,9,11,0.3)', backdropFilter: 'blur(2px)', zIndex: 300 }}
-      />
-
-      {/* Panel */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.25)', backdropFilter: 'blur(2px)', zIndex: 300 }} />
       <div style={{
         position: 'fixed', right: 0, top: 0, bottom: 0, width: 460,
-        background: '#fff', zIndex: 301,
+        background: DS.cardBg, zIndex: 301,
         boxShadow: '-8px 0 32px rgba(0,0,0,0.10)',
         display: 'flex', flexDirection: 'column',
         animation: 'slideInRight 0.25s ease-out',
       }}>
-        <style>{`
-          @keyframes slideInRight {
-            from { transform: translateX(100%); }
-            to   { transform: translateX(0); }
-          }
-        `}</style>
+        <style>{`@keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
 
         {/* Header */}
-        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid rgba(0,0,0,0.07)', flexShrink: 0 }}>
+        <div style={{ padding: '18px 22px 14px', borderBottom: `1px solid ${DS.cardBorder}`, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 3 }}>Prospect</p>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#09090B', letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {prospect.company_name}
-              </h2>
-              {prospect.contact_name && (
-                <p style={{ fontSize: 13, color: '#71717A', marginTop: 2 }}>
-                  {prospect.contact_name}{prospect.contact_title ? ` · ${prospect.contact_title}` : ''}
-                </p>
-              )}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                background: DS.accentLight, color: DS.primary,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 13, fontWeight: 700,
+              }}>
+                {getInitials(prospect.company_name)}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 10, fontWeight: 600, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 2 }}>Prospect</p>
+                <h2 style={{ fontSize: 17, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {prospect.company_name}
+                </h2>
+                {prospect.contact_name && (
+                  <p style={{ fontSize: 12.5, color: DS.secondary, marginTop: 1 }}>
+                    {prospect.contact_name}{prospect.contact_title ? ` · ${prospect.contact_title}` : ''}
+                  </p>
+                )}
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
               {prospect.enriched && (
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.10)', padding: '2px 8px', borderRadius: 20 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 700, color: DS.primary, background: DS.accentLight, padding: '2px 8px', borderRadius: 20 }}>
                   ✦ Enriched
                 </span>
               )}
-              <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A1A1AA', padding: 4, display: 'flex' }}>
-                <X size={18} />
+              <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.muted, padding: 3, display: 'flex' }}>
+                <X size={17} />
               </button>
             </div>
           </div>
         </div>
 
-        {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent' }}>
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent` }}>
 
-          {/* Stage */}
-          <div style={{ marginBottom: 20 }}>
-            <p style={labelStyle}>Stage</p>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ marginBottom: 18 }}>
+            <p style={lbl}>Stage</p>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {STAGES.map(s => {
-                const st = STAGE_STYLE[s]
+                const st     = STAGE_STYLE[s]
                 const active = s === stage
                 return (
-                  <button
-                    key={s}
-                    onClick={() => changeStage(s)}
-                    style={{
-                      padding: '4px 12px', borderRadius: 20, fontSize: 11.5, fontWeight: 600,
-                      border: `1.5px solid ${active ? st.color : 'rgba(0,0,0,0.08)'}`,
-                      background: active ? st.bg : 'transparent',
-                      color: active ? st.color : '#71717A',
-                      cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
-                    }}
-                  >
+                  <button key={s} onClick={() => changeStage(s)} style={{
+                    padding: '3px 11px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                    border: `1.5px solid ${active ? st.color : DS.cardBorder}`,
+                    background: active ? st.bg : 'transparent',
+                    color: active ? st.color : DS.secondary,
+                    cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+                  }}>
                     {s}
                   </button>
                 )
@@ -334,79 +308,76 @@ function ProspectDetail({
             </div>
           </div>
 
-          {/* Contact info */}
           {(prospect.email || prospect.phone) && (
-            <div style={{ background: '#F4F4F5', borderRadius: 10, padding: '12px 14px', marginBottom: 20 }}>
-              <p style={labelStyle}>Contact Info</p>
-              {prospect.email && <p style={{ fontSize: 13, color: '#09090B', marginBottom: 3 }}>✉ {prospect.email}</p>}
-              {prospect.phone && <p style={{ fontSize: 13, color: '#09090B' }}>📞 {prospect.phone}</p>}
+            <div style={{ background: DS.accentMid, borderRadius: 9, padding: '11px 13px', marginBottom: 18 }}>
+              <p style={lbl}>Contact Info</p>
+              {prospect.email && <p style={{ fontSize: 12.5, color: DS.bodyText, marginBottom: 2 }}>✉ {prospect.email}</p>}
+              {prospect.phone && <p style={{ fontSize: 12.5, color: DS.bodyText }}>📞 {prospect.phone}</p>}
               {prospect.email_format && !prospect.email && (
-                <p style={{ fontSize: 12, color: '#71717A', marginTop: 4 }}>Format: {prospect.email_format}</p>
+                <p style={{ fontSize: 11.5, color: DS.secondary, marginTop: 4 }}>Format: {prospect.email_format}</p>
               )}
             </div>
           )}
 
-          {/* Research brief */}
           {prospect.company_overview && (
-            <div style={{ marginBottom: 16 }}>
-              <p style={labelStyle}>Company Overview</p>
-              <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.65 }}>{prospect.company_overview}</p>
+            <div style={{ marginBottom: 14 }}>
+              <p style={lbl}>Company Overview</p>
+              <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.65 }}>{prospect.company_overview}</p>
             </div>
           )}
 
           {prospect.pain_points && (
-            <div style={{ marginBottom: 16 }}>
-              <p style={labelStyle}>Pain Points</p>
-              <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.65 }}>{prospect.pain_points}</p>
+            <div style={{ marginBottom: 14 }}>
+              <p style={lbl}>Pain Points</p>
+              <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.65 }}>{prospect.pain_points}</p>
             </div>
           )}
 
           {prospect.pitch_angle && (
-            <div style={{ marginBottom: 16 }}>
-              <p style={labelStyle}>Pitch Angle</p>
-              <p style={{ fontSize: 13, color: accent, lineHeight: 1.65, fontWeight: 500 }}>{prospect.pitch_angle}</p>
+            <div style={{ marginBottom: 14, borderLeft: `3px solid ${DS.primary}`, paddingLeft: 10, background: DS.accentMid, borderRadius: '0 7px 7px 0', padding: '9px 12px 9px 11px' }}>
+              <p style={lbl}>Pitch Angle</p>
+              <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.65, fontWeight: 500 }}>{prospect.pitch_angle}</p>
             </div>
           )}
 
           {tps.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <p style={labelStyle}>Talking Points</p>
+            <div style={{ marginBottom: 18 }}>
+              <p style={lbl}>Talking Points</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {tps.map((tp, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: accent, background: glow, borderRadius: 4, padding: '1px 6px', flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
-                    <p style={{ fontSize: 13, color: '#52525B', lineHeight: 1.6 }}>{tp}</p>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: DS.primary, background: DS.accentLight, borderRadius: 4, padding: '1px 6px', flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
+                    <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.6 }}>{tp}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Notes */}
-          <div style={{ marginBottom: 20 }}>
-            <p style={labelStyle}>Notes</p>
+          <div style={{ marginBottom: 18 }}>
+            <p style={lbl}>Notes</p>
             <textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
               rows={4}
               placeholder="Add notes about this prospect..."
               style={{
-                width: '100%', padding: '10px 12px',
-                background: '#F4F4F5', border: '1.5px solid rgba(0,0,0,0.10)',
-                borderRadius: 9, fontSize: 13, color: '#09090B',
+                width: '100%', padding: '9px 11px',
+                background: DS.inputBg, border: `1.5px solid ${DS.outlineBorder}`,
+                borderRadius: 8, fontSize: 12.5, color: DS.bodyText,
                 outline: 'none', fontFamily: 'inherit', resize: 'vertical',
                 lineHeight: 1.6, transition: 'all 0.15s',
               }}
-              onFocus={e => { e.target.style.borderColor = accent; e.target.style.background = '#fff'; e.target.style.boxShadow = `0 0 0 3px ${glow}` }}
-              onBlur={e => { e.target.style.borderColor = 'rgba(0,0,0,0.10)'; e.target.style.background = '#F4F4F5'; e.target.style.boxShadow = 'none' }}
+              onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.background = '#fff'; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}` }}
+              onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.background = DS.inputBg; e.target.style.boxShadow = 'none' }}
             />
             {notes !== prospect.notes && (
               <button
                 onClick={saveNotes}
                 disabled={savingNotes}
                 style={{
-                  marginTop: 8, padding: '7px 16px', borderRadius: 8, border: 'none',
-                  background: accent, color: 'white', fontSize: 12, fontWeight: 600,
+                  marginTop: 7, padding: '6px 14px', borderRadius: 7, border: 'none',
+                  background: DS.primary, color: 'white', fontSize: 11.5, fontWeight: 600,
                   cursor: 'pointer', fontFamily: 'inherit',
                 }}
               >
@@ -416,36 +387,34 @@ function ProspectDetail({
           </div>
         </div>
 
-        {/* Footer actions */}
-        <div style={{ padding: '14px 24px', borderTop: '1px solid rgba(0,0,0,0.07)', display: 'flex', gap: 8, flexShrink: 0, background: '#FAFAFA' }}>
+        {/* Footer */}
+        <div style={{ padding: '12px 22px', borderTop: `1px solid ${DS.cardBorder}`, display: 'flex', gap: 8, flexShrink: 0, background: DS.pageBg }}>
           <button
             onClick={generateFollowUp}
             disabled={draftLoading}
             style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              padding: '10px 14px', borderRadius: 9, border: 'none',
-              background: draftLoading ? '#E4E4E7' : accent,
-              color: 'white', fontSize: 13, fontWeight: 600,
-              cursor: draftLoading ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit', minHeight: 44,
-              boxShadow: draftLoading ? 'none' : `0 2px 8px ${glow}`,
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              padding: '9px 12px', borderRadius: 7, border: 'none',
+              background: draftLoading ? '#E4E4E7' : DS.primary,
+              color: 'white', fontSize: 12, fontWeight: 600,
+              cursor: draftLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', minHeight: 38,
+              boxShadow: draftLoading ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
             }}
           >
-            {draftLoading ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={13} />}
+            {draftLoading ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={12} />}
             {draftLoading ? 'Writing…' : 'Generate Follow-Up'}
           </button>
           <button
             onClick={openCoach}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              padding: '10px 16px', borderRadius: 9,
-              border: '1.5px solid rgba(0,0,0,0.10)',
-              background: '#fff', color: '#52525B',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              fontFamily: 'inherit', minHeight: 44,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              padding: '9px 14px', borderRadius: 7,
+              border: `1.5px solid ${DS.outlineBorder}`,
+              background: DS.cardBg, color: DS.outlineText,
+              fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', minHeight: 38,
             }}
           >
-            <Bot size={13} /> AI Coach
+            <Bot size={12} /> AI Coach
           </button>
         </div>
       </div>
@@ -455,104 +424,78 @@ function ProspectDetail({
   )
 }
 
-// ─── Skeleton Card ────────────────────────────────────────────────────────────
+// ── Skeleton Card ─────────────────────────────────────────────────────────────
 
 function SkeletonCard() {
   return (
-    <div style={{ background: '#fff', borderRadius: 14, border: '1px solid rgba(0,0,0,0.07)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-      <div style={{ height: 3, background: '#F4F4F5' }} />
-      <div style={{ padding: '16px' }}>
-        <div className="sk" style={{ height: 16, width: '55%', marginBottom: 8 }} />
-        <div className="sk" style={{ height: 11, width: '35%', marginBottom: 16 }} />
-        <div className="sk" style={{ height: 10, width: '25%', marginBottom: 6 }} />
-        <div className="sk" style={{ height: 11, width: '90%', marginBottom: 4 }} />
-        <div className="sk" style={{ height: 11, width: '75%', marginBottom: 16 }} />
-        <div className="sk" style={{ height: 10, width: '25%', marginBottom: 6 }} />
-        <div className="sk" style={{ height: 11, width: '85%', marginBottom: 4 }} />
-        <div className="sk" style={{ height: 11, width: '60%', marginBottom: 16 }} />
-        <div className="sk" style={{ height: 10, width: '30%', marginBottom: 6 }} />
-        <div className="sk" style={{ height: 11, width: '95%', marginBottom: 4 }} />
-        <div className="sk" style={{ height: 11, width: '70%', marginBottom: 16 }} />
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <div className="sk" style={{ height: 30, width: 110, borderRadius: 8 }} />
-          <div className="sk" style={{ height: 30, width: 120, borderRadius: 8 }} />
+    <div style={{ background: DS.cardBg, borderRadius: 10, border: `1px solid ${DS.cardBorder}`, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+      <div style={{ height: 3, background: DS.accentMid }} />
+      <div style={{ padding: '14px' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+          <div className="sk" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div className="sk" style={{ height: 14, width: '55%', marginBottom: 6 }} />
+            <div className="sk" style={{ height: 10, width: '35%' }} />
+          </div>
+        </div>
+        <div className="sk" style={{ height: 10, width: '90%', marginBottom: 4 }} />
+        <div className="sk" style={{ height: 10, width: '75%', marginBottom: 12 }} />
+        <div className="sk" style={{ height: 36, width: '100%', borderRadius: 7 }} />
+        <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+          <div className="sk" style={{ height: 28, width: 100, borderRadius: 6 }} />
+          <div className="sk" style={{ height: 28, width: 110, borderRadius: 6 }} />
         </div>
       </div>
     </div>
   )
 }
 
-// ─── AI Search Tab ────────────────────────────────────────────────────────────
+// ── AI Search Tab ─────────────────────────────────────────────────────────────
 
 function AISearchTab({
-  business, accent, glow, prospects, onProspectsAdded,
+  business, prospects, onProspectsAdded,
 }: {
-  business: Business
-  accent: string
-  glow: string
-  prospects: Prospect[]
-  onProspectsAdded: (ps: Prospect[]) => void
+  business: Business; prospects: Prospect[]; onProspectsAdded: (ps: Prospect[]) => void
 }) {
-  const [query,          setQuery]          = useState('')
-  const [searching,      setSearching]      = useState(false)
-  const [results,        setResults]        = useState<BatchResult[]>([])
-  const [searchErr,      setSearchErr]      = useState('')
-  const [cachedSearch,   setCachedSearch]   = useState<ProspectSearch | null>(null)
-  const [selectedIdx,    setSelectedIdx]    = useState<Set<number>>(new Set())
-  const [savedMap,       setSavedMap]       = useState<Map<number, Prospect>>(new Map())
-  const [duplicateIdx,   setDuplicateIdx]   = useState<Set<number>>(new Set())
-  const [inPipelineIdx,  setInPipelineIdx]  = useState<Set<number>>(new Set())
-  const [addingIdx,      setAddingIdx]      = useState<Set<number>>(new Set())
-  const [savingAll,      setSavingAll]      = useState(false)
-  const [emailModal,     setEmailModal]     = useState<DraftEmail | null>(null)
+  const [query,         setQuery]         = useState('')
+  const [searching,     setSearching]     = useState(false)
+  const [results,       setResults]       = useState<BatchResult[]>([])
+  const [searchErr,     setSearchErr]     = useState('')
+  const [cachedSearch,  setCachedSearch]  = useState<ProspectSearch | null>(null)
+  const [selectedIdx,   setSelectedIdx]   = useState<Set<number>>(new Set())
+  const [savedMap,      setSavedMap]      = useState<Map<number, Prospect>>(new Map())
+  const [duplicateIdx,  setDuplicateIdx]  = useState<Set<number>>(new Set())
+  const [inPipelineIdx, setInPipelineIdx] = useState<Set<number>>(new Set())
+  const [addingIdx,     setAddingIdx]     = useState<Set<number>>(new Set())
+  const [savingAll,     setSavingAll]     = useState(false)
+  const [emailModal,    setEmailModal]    = useState<DraftEmail | null>(null)
 
-  const pills = quickSearches(business)
-  const existingCompanies = prospects.map(p => p.company_name)
-  const sl: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#A1A1AA', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }
+  const pills              = quickSearches(business)
+  const existingCompanies  = prospects.map(p => p.company_name)
+  const sl: React.CSSProperties = { fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 4 }
 
   const runSearch = async (q: string, force = false) => {
     const text = q.trim()
     if (!text || searching) return
-    setQuery(text)
-    setSearching(true)
-    setResults([])
-    setSearchErr('')
-    setCachedSearch(null)
-    setSelectedIdx(new Set())
-    setSavedMap(new Map())
-    setDuplicateIdx(new Set())
-    setInPipelineIdx(new Set())
+    setQuery(text); setSearching(true); setResults([]); setSearchErr(''); setCachedSearch(null)
+    setSelectedIdx(new Set()); setSavedMap(new Map()); setDuplicateIdx(new Set()); setInPipelineIdx(new Set())
 
-    // Check cache
     if (!force) {
       const cached = await checkRecentSearch(business.id, text)
       if (cached.found && cached.search && cached.prospects && cached.prospects.length >= 3) {
         setCachedSearch(cached.search)
         const batchResults: BatchResult[] = cached.prospects.map(p => ({
-          company_name:  p.company_name,
-          website:       p.website ?? '',
-          location:      p.location ?? '',
-          overview:      p.company_overview ?? '',
-          contact_name:  p.contact_name ?? '',
-          contact_title: p.contact_title ?? '',
-          email_format:  p.email_format ?? '',
-          pain_points:   p.pain_points ?? '',
-          pitch_angle:   p.pitch_angle ?? '',
-          email_subject: '',
-          email_body:    '',
+          company_name: p.company_name, website: p.website ?? '', location: p.location ?? '',
+          overview: p.company_overview ?? '', contact_name: p.contact_name ?? '',
+          contact_title: p.contact_title ?? '', email_format: p.email_format ?? '',
+          pain_points: p.pain_points ?? '', pitch_angle: p.pitch_angle ?? '',
+          email_subject: '', email_body: '',
         }))
         setResults(batchResults)
         const sm = new Map<number, Prospect>()
-        const di = new Set<number>()
         const pi = new Set<number>()
-        cached.prospects.forEach((p, i) => {
-          sm.set(i, p)
-          if (p.status === 'pipeline') pi.add(i)
-        })
-        setSavedMap(sm)
-        setInPipelineIdx(pi)
-        setDuplicateIdx(di)
-        setSearching(false)
+        cached.prospects.forEach((p, i) => { sm.set(i, p); if (p.status === 'pipeline') pi.add(i) })
+        setSavedMap(sm); setInPipelineIdx(pi); setSearching(false)
         return
       }
     }
@@ -568,34 +511,19 @@ function AISearchTab({
         }),
       })
       const data = await res.json()
-      if (!data.results?.length) {
-        setSearchErr(data.error || 'No results found. Try a more specific search.')
-        setSearching(false)
-        return
-      }
+      if (!data.results?.length) { setSearchErr(data.error || 'No results found. Try a more specific search.'); setSearching(false); return }
 
       const batchResults: BatchResult[] = data.results
-      setResults(batchResults)
-      setSearching(false)
+      setResults(batchResults); setSearching(false)
 
-      // Auto-save all to Supabase in background
       const saves = await Promise.all(
         batchResults.map((r, i) =>
           saveProspectFromSearch({
-            business_id:      business.id,
-            company_name:     r.company_name,
-            contact_name:     r.contact_name,
-            contact_title:    r.contact_title,
-            email:            r.email_format,
-            website:          r.website,
-            location:         r.location,
-            company_overview: r.overview,
-            email_format:     r.email_format,
-            pain_points:      r.pain_points,
-            pitch_angle:      r.pitch_angle,
-            talking_points:   '[]',
-            search_query:     text,
-            source:           'ai_search_batch',
+            business_id: business.id, company_name: r.company_name, contact_name: r.contact_name,
+            contact_title: r.contact_title, email: r.email_format, website: r.website,
+            location: r.location, company_overview: r.overview, email_format: r.email_format,
+            pain_points: r.pain_points, pitch_angle: r.pitch_angle, talking_points: '[]',
+            search_query: text, source: 'ai_search_batch',
           }).then(saved => ({ i, saved }))
         )
       )
@@ -614,9 +542,7 @@ function AISearchTab({
         }
       })
 
-      setSavedMap(sm)
-      setDuplicateIdx(di)
-      setInPipelineIdx(pi)
+      setSavedMap(sm); setDuplicateIdx(di); setInPipelineIdx(pi)
       if (newProspects.length) onProspectsAdded(newProspects)
       await saveSearch(business.id, text, batchResults.length)
     } catch {
@@ -627,11 +553,7 @@ function AISearchTab({
 
   const toggleSelect = (i: number) => {
     if (duplicateIdx.has(i)) return
-    setSelectedIdx(prev => {
-      const next = new Set(prev)
-      next.has(i) ? next.delete(i) : next.add(i)
-      return next
-    })
+    setSelectedIdx(prev => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next })
   }
 
   const addOneToPipeline = async (i: number) => {
@@ -648,10 +570,7 @@ function AISearchTab({
     const toSave = indices
       ? Array.from(indices).filter(i => !inPipelineIdx.has(i) && savedMap.has(i))
       : Array.from(savedMap.keys()).filter(i => !inPipelineIdx.has(i) && !duplicateIdx.has(i))
-    await Promise.all(toSave.map(i => {
-      const p = savedMap.get(i)!
-      return moveToLeadsPipeline(p.id, business.id)
-    }))
+    await Promise.all(toSave.map(i => { const p = savedMap.get(i)!; return moveToLeadsPipeline(p.id, business.id) }))
     setInPipelineIdx(prev => new Set([...prev, ...toSave]))
     setSavingAll(false)
   }
@@ -660,121 +579,135 @@ function AISearchTab({
   const inPipelineCount   = Array.from(inPipelineIdx).filter(i => !duplicateIdx.has(i)).length
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px 40px', scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 40px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
       <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-        .sk { background: linear-gradient(90deg, #F4F4F5 25%, #E8E8E8 50%, #F4F4F5 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
-        .batch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+        .sk { background: linear-gradient(90deg, #F0F7F4 25%, #E1F5EE 50%, #F0F7F4 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+        .batch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         @media (max-width: 860px) { .batch-grid { grid-template-columns: 1fr; } }
+        .prospect-card:hover { border-color: #1D9E75 !important; box-shadow: 0 3px 10px rgba(29,158,117,0.10) !important; }
+        .prospect-card.selected { border-color: #1D9E75 !important; border-width: 1.5px !important; }
       `}</style>
 
       {/* Search bar */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', gap: 10,
-          background: '#fff', border: '1.5px solid rgba(0,0,0,0.10)',
-          borderRadius: 10, padding: '0 14px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)', transition: 'border-color 0.15s, box-shadow 0.15s',
+          flex: 1, display: 'flex', alignItems: 'center', gap: 9,
+          background: DS.inputBg, border: `1.5px solid ${DS.outlineBorder}`,
+          borderRadius: 8, padding: '0 13px', height: 38,
+          transition: 'border-color 0.15s, box-shadow 0.15s',
         }}
-          onFocusCapture={e => { (e.currentTarget as HTMLDivElement).style.borderColor = accent; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 3px ${glow}` }}
-          onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(0,0,0,0.10)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' } }}
+          onFocusCapture={e => { (e.currentTarget as HTMLDivElement).style.borderColor = DS.primary; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 3px ${DS.primaryGlow}` }}
+          onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { (e.currentTarget as HTMLDivElement).style.borderColor = DS.outlineBorder; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' } }}
         >
-          <Search size={15} color="#A1A1AA" style={{ flexShrink: 0 }} />
+          <Search size={13} color={DS.muted} style={{ flexShrink: 0 }} />
           <input
             type="text" placeholder="Search for prospects (returns 10 results)..."
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && runSearch(query)}
-            style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: '#09090B', background: 'transparent', padding: '13px 0', fontFamily: 'inherit' }}
+            style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13.5, color: DS.bodyText, background: 'transparent', fontFamily: 'inherit' }}
           />
         </div>
         <button
           onClick={() => runSearch(query)} disabled={!query.trim() || searching}
           style={{
-            padding: '0 22px', borderRadius: 10, border: 'none',
-            background: query.trim() && !searching ? accent : '#E4E4E7',
-            color: 'white', fontSize: 13.5, fontWeight: 600,
+            padding: '0 18px', borderRadius: 8, border: 'none', height: 38,
+            background: query.trim() && !searching ? DS.primary : '#E4E4E7',
+            color: 'white', fontSize: 12, fontWeight: 600,
             cursor: query.trim() && !searching ? 'pointer' : 'not-allowed',
-            fontFamily: 'inherit', letterSpacing: '-0.2px',
-            boxShadow: query.trim() && !searching ? `0 2px 8px ${glow}` : 'none',
-            transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 7, minHeight: 44,
+            fontFamily: 'inherit',
+            boxShadow: query.trim() && !searching ? `0 2px 8px ${DS.primaryGlow}` : 'none',
+            transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 6,
           }}
         >
-          {searching ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={14} />}
+          {searching ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={13} />}
           {searching ? 'Researching…' : 'Find 10 Prospects'}
         </button>
       </div>
 
       {/* Quick pills */}
       {!results.length && !searching && (
-        <div style={{ marginBottom: 28 }}>
-          <p style={{ ...sl, marginBottom: 10 }}>Quick Searches</p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginBottom: 24 }}>
+          <p style={{ ...sl, marginBottom: 9 }}>Quick Searches</p>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
             {pills.map(pill => (
               <button key={pill}
                 onClick={() => { setQuery(pill); runSearch(pill) }}
-                style={{ padding: '6px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 500, border: '1px solid rgba(0,0,0,0.10)', background: '#F4F4F5', color: '#52525B', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', whiteSpace: 'nowrap' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = accent; (e.currentTarget as HTMLButtonElement).style.color = accent; (e.currentTarget as HTMLButtonElement).style.background = glow }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,0,0,0.10)'; (e.currentTarget as HTMLButtonElement).style.color = '#52525B'; (e.currentTarget as HTMLButtonElement).style.background = '#F4F4F5' }}
+                style={{ padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 500, border: `1px solid ${DS.outlineBorder}`, background: DS.accentLight, color: DS.outlineText, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', whiteSpace: 'nowrap' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = DS.primary; (e.currentTarget as HTMLButtonElement).style.color = DS.primary }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = DS.outlineBorder; (e.currentTarget as HTMLButtonElement).style.color = DS.outlineText }}
               >{pill}</button>
             ))}
           </div>
         </div>
       )}
 
-      {/* Error */}
       {searchErr && (
-        <div style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.15)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
-          <p style={{ fontSize: 13, color: '#DC2626', fontWeight: 500 }}>⚠ {searchErr}</p>
+        <div style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.14)', borderRadius: 9, padding: '11px 14px', marginBottom: 14 }}>
+          <p style={{ fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {searchErr}</p>
         </div>
       )}
 
-      {/* Cached banner */}
       {cachedSearch && results.length > 0 && (
-        <div style={{ background: glow, border: `1px solid ${accent}22`, borderRadius: 9, padding: '9px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <p style={{ fontSize: 12.5, color: accent, fontWeight: 500 }}>
-            🕐 Searched {Math.floor((Date.now() - new Date(cachedSearch.created_at).getTime()) / 86400000)} day{Math.floor((Date.now() - new Date(cachedSearch.created_at).getTime()) / 86400000) !== 1 ? 's' : ''} ago — showing saved results
+        <div style={{ background: DS.accentLight, border: `1px solid ${DS.primary}22`, borderRadius: 8, padding: '8px 13px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <p style={{ fontSize: 12, color: DS.primary, fontWeight: 500 }}>
+            🕐 Searched {Math.floor((Date.now() - new Date(cachedSearch.created_at).getTime()) / 86400000)}d ago — showing saved results
           </p>
           <button onClick={() => runSearch(query, true)}
-            style={{ fontSize: 12, fontWeight: 600, color: accent, background: 'none', border: `1px solid ${accent}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>
+            style={{ fontSize: 11.5, fontWeight: 600, color: DS.primary, background: 'none', border: `1px solid ${DS.primary}`, borderRadius: 5, padding: '2px 9px', cursor: 'pointer', fontFamily: 'inherit' }}>
             Refresh
           </button>
         </div>
       )}
 
-      {/* Results action bar */}
+      {/* Summary bar */}
       {results.length > 0 && !searching && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#09090B' }}>
-            {results.length} prospects found
-            {duplicateIdx.size > 0 && <span style={{ fontSize: 12, color: '#A1A1AA', fontWeight: 400 }}> · {duplicateIdx.size} already saved</span>}
-            {inPipelineCount > 0 && <span style={{ fontSize: 12, color: '#059669', fontWeight: 400 }}> · {inPipelineCount} in pipeline</span>}
-          </p>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: DS.bodyText, background: DS.accentLight, border: `1px solid ${DS.cardBorder}`, padding: '3px 10px', borderRadius: 20 }}>
+              {results.length} found
+            </span>
+            {duplicateIdx.size > 0 && (
+              <span style={{ fontSize: 11.5, color: DS.muted, background: DS.pageBg, border: `1px solid ${DS.cardBorder}`, padding: '3px 10px', borderRadius: 20 }}>
+                {duplicateIdx.size} already saved
+              </span>
+            )}
+            {inPipelineCount > 0 && (
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: DS.primary, background: DS.accentLight, border: `1px solid ${DS.cardBorder}`, padding: '3px 10px', borderRadius: 20 }}>
+                {inPipelineCount} in pipeline
+              </span>
+            )}
+            {selectedIdx.size > 0 && (
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: '#0891B2', background: 'rgba(8,145,178,0.10)', border: '1px solid rgba(8,145,178,0.2)', padding: '3px 10px', borderRadius: 20 }}>
+                {selectedIdx.size} selected
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 7 }}>
             {selectedIdx.size > 0 && (
               <button
                 onClick={() => addAllToPipeline(selectedIdx)}
                 disabled={savingAll}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 9, border: `1.5px solid ${accent}`, background: '#fff', color: accent, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', minHeight: 38 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7, border: `1.5px solid ${DS.primary}`, background: DS.cardBg, color: DS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
               >
-                <Plus size={13} /> Add Selected ({selectedIdx.size}) to Pipeline
+                <Plus size={12} /> Add Selected ({selectedIdx.size})
               </button>
             )}
             <button
               onClick={() => addAllToPipeline()}
               disabled={savingAll || inPipelineCount >= nonDuplicateCount}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 18px', borderRadius: 9, border: 'none',
-                background: savingAll || inPipelineCount >= nonDuplicateCount ? '#E4E4E7' : accent,
-                color: 'white', fontSize: 13, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7, border: 'none',
+                background: savingAll || inPipelineCount >= nonDuplicateCount ? '#E4E4E7' : DS.primary,
+                color: 'white', fontSize: 12, fontWeight: 600,
                 cursor: savingAll || inPipelineCount >= nonDuplicateCount ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', minHeight: 38,
-                boxShadow: savingAll || inPipelineCount >= nonDuplicateCount ? 'none' : `0 2px 8px ${glow}`,
+                fontFamily: 'inherit',
+                boxShadow: savingAll || inPipelineCount >= nonDuplicateCount ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
               }}
             >
-              {savingAll ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={13} />}
+              {savingAll ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={12} />}
               {inPipelineCount >= nonDuplicateCount ? '✓ All in Pipeline' : savingAll ? 'Saving…' : 'Save All to Pipeline'}
             </button>
           </div>
@@ -798,86 +731,102 @@ function AISearchTab({
             const isSelected= selectedIdx.has(i)
             const saved     = savedMap.get(i)
             return (
-              <div key={i} style={{
-                background: '#fff',
-                border: isDupe ? '1px solid rgba(0,0,0,0.05)' : '1px solid rgba(0,0,0,0.07)',
-                borderRadius: 14, overflow: 'hidden',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
-                opacity: isDupe ? 0.65 : 1,
-                position: 'relative',
-              }}>
-                <div style={{ height: 3, background: isDupe ? '#E4E4E7' : inPipe ? '#059669' : accent }} />
-                <div style={{ padding: '14px 16px' }}>
+              <div
+                key={i}
+                className={`prospect-card${isSelected ? ' selected' : ''}`}
+                style={{
+                  background:   DS.cardBg,
+                  border:       `1px solid ${isDupe ? DS.accentMid : DS.cardBorder}`,
+                  borderRadius: 10, overflow: 'hidden',
+                  boxShadow:    '0 1px 3px rgba(0,0,0,0.05)',
+                  opacity:      isDupe ? 0.65 : 1,
+                  transition:   'border-color 0.15s, box-shadow 0.15s',
+                }}
+              >
+                <div style={{ height: 3, background: isDupe ? DS.accentMid : inPipe ? '#059669' : DS.primary }} />
+                <div style={{ padding: '13px 14px' }}>
 
-                  {/* Header row */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: '#09090B', letterSpacing: '-0.3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {/* Header: checkbox + avatar + company */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginBottom: 10 }}>
+                    {!isDupe && (
+                      <input
+                        type="checkbox" checked={isSelected}
+                        onChange={() => toggleSelect(i)}
+                        style={{ width: 14, height: 14, cursor: 'pointer', accentColor: DS.primary, flexShrink: 0, marginTop: 3 }}
+                      />
+                    )}
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                      background: isDupe ? DS.pageBg : DS.accentLight,
+                      color: isDupe ? DS.muted : DS.primary,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, fontWeight: 700,
+                    }}>
+                      {getInitials(r.company_name)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13.5, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {r.company_name}
                       </p>
                       {(r.contact_name || r.location) && (
-                        <p style={{ fontSize: 11.5, color: '#71717A', marginTop: 2 }}>
-                          {r.contact_name && <><strong style={{ color: '#52525B' }}>{r.contact_name}</strong>{r.contact_title ? ` · ${r.contact_title}` : ''}</>}
-                          {r.location && <span style={{ color: '#A1A1AA' }}>{r.contact_name ? ' · ' : ''}{r.location}</span>}
+                        <p style={{ fontSize: 11, color: DS.secondary, marginTop: 1 }}>
+                          {r.contact_name && <><strong style={{ color: DS.secondary }}>{r.contact_name}</strong>{r.contact_title ? ` · ${r.contact_title}` : ''}</>}
+                          {r.location && <span style={{ color: DS.muted }}>{r.contact_name ? ' · ' : ''}{r.location}</span>}
                         </p>
                       )}
                       {r.website && (
                         <a href={r.website.startsWith('http') ? r.website : `https://${r.website}`} target="_blank" rel="noopener noreferrer"
-                          style={{ fontSize: 11, color: accent, textDecoration: 'none', display: 'inline-block', marginTop: 2 }}>
+                          style={{ fontSize: 10.5, color: DS.primary, textDecoration: 'none', display: 'inline-block', marginTop: 1 }}>
                           {r.website.replace(/^https?:\/\//, '').split('/')[0]} ↗
                         </a>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                      {isDupe
-                        ? <span style={{ fontSize: 10, fontWeight: 700, color: '#A1A1AA', background: '#F4F4F5', padding: '2px 8px', borderRadius: 20 }}>Already saved</span>
-                        : inPipe
-                          ? <span style={{ fontSize: 10, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.1)', padding: '2px 8px', borderRadius: 20 }}>✓ Pipeline</span>
-                          : (
-                            <input
-                              type="checkbox" checked={isSelected}
-                              onChange={() => toggleSelect(i)}
-                              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: accent }}
-                            />
-                          )
-                      }
-                    </div>
+                    {isDupe ? (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, background: DS.pageBg, padding: '2px 7px', borderRadius: 20, flexShrink: 0 }}>Saved</span>
+                    ) : inPipe ? (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.10)', padding: '2px 7px', borderRadius: 20, flexShrink: 0 }}>✓ Pipeline</span>
+                    ) : null}
                   </div>
 
                   {/* Overview */}
                   {r.overview && (
-                    <p style={{ fontSize: 12, color: '#52525B', lineHeight: 1.6, marginBottom: 10 }}>{r.overview}</p>
+                    <p style={{ fontSize: 11.5, color: DS.secondary, lineHeight: 1.6, marginBottom: 9 }}>{r.overview}</p>
                   )}
 
                   {/* Pain points */}
                   {r.pain_points && (
                     <div style={{ marginBottom: 8 }}>
                       <p style={sl}>Pain Points</p>
-                      <p style={{ fontSize: 12, color: '#52525B', lineHeight: 1.6 }}>{r.pain_points}</p>
+                      <p style={{ fontSize: 11.5, color: DS.secondary, lineHeight: 1.6 }}>{r.pain_points}</p>
                     </div>
                   )}
 
-                  {/* Pitch */}
+                  {/* Pitch block with green left border */}
                   {r.pitch_angle && (
-                    <div style={{ marginBottom: 10 }}>
+                    <div style={{
+                      marginBottom: 10,
+                      borderLeft: `3px solid ${DS.primary}`,
+                      background: DS.accentMid,
+                      borderRadius: '0 6px 6px 0',
+                      padding: '8px 11px',
+                    }}>
                       <p style={sl}>Pitch</p>
-                      <p style={{ fontSize: 12, color: accent, lineHeight: 1.6, fontWeight: 500 }}>{r.pitch_angle}</p>
+                      <p style={{ fontSize: 11.5, color: DS.bodyText, lineHeight: 1.6, fontWeight: 500 }}>{r.pitch_angle}</p>
                     </div>
                   )}
 
-                  {/* Email format */}
                   {r.email_format && (
-                    <p style={{ fontSize: 11, color: '#A1A1AA', fontFamily: 'monospace', marginBottom: 12 }}>{r.email_format}</p>
+                    <p style={{ fontSize: 10.5, color: DS.muted, fontFamily: 'monospace', marginBottom: 10 }}>{r.email_format}</p>
                   )}
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: 7, marginTop: 4 }}>
+                  {/* Action buttons */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                     {r.email_subject && r.email_body && (
                       <button
                         onClick={() => setEmailModal({ subject: r.email_subject, body: r.email_body })}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', borderRadius: 7, border: '1.5px solid rgba(0,0,0,0.10)', background: '#fff', color: '#52525B', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', minHeight: 32 }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1.5px solid ${DS.outlineBorder}`, background: DS.cardBg, color: DS.outlineText, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                       >
-                        <Mail size={11} /> Draft Email
+                        <Mail size={10} /> Draft Email
                       </button>
                     )}
                     {!isDupe && (
@@ -886,18 +835,17 @@ function AISearchTab({
                         disabled={isAdding || inPipe || !saved}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 4,
-                          padding: '6px 12px', borderRadius: 7, border: 'none',
-                          background: inPipe ? '#059669' : isAdding || !saved ? '#E4E4E7' : accent,
-                          color: 'white', fontSize: 12, fontWeight: 600,
+                          padding: '5px 10px', borderRadius: 6, border: 'none',
+                          background: inPipe ? '#059669' : isAdding || !saved ? '#E4E4E7' : DS.primary,
+                          color: 'white', fontSize: 11.5, fontWeight: 600,
                           cursor: isAdding || inPipe || !saved ? 'default' : 'pointer',
-                          fontFamily: 'inherit', minHeight: 32,
-                          boxShadow: !inPipe && !isAdding && saved ? `0 1px 6px ${glow}` : 'none',
+                          fontFamily: 'inherit',
+                          boxShadow: !inPipe && !isAdding && saved ? `0 1px 6px ${DS.primaryGlow}` : 'none',
                         }}
                       >
-                        {inPipe ? <><Check size={11} /> Pipeline</>
-                          : isAdding ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
-                            : !saved ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
-                              : <><Plus size={11} /> Pipeline</>
+                        {inPipe ? <><Check size={10} /> Pipeline</>
+                          : isAdding || !saved ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
+                            : <><Plus size={10} /> Pipeline</>
                         }
                       </button>
                     )}
@@ -914,22 +862,18 @@ function AISearchTab({
   )
 }
 
-// ─── My Lists Tab ─────────────────────────────────────────────────────────────
+// ── My Lists Tab ──────────────────────────────────────────────────────────────
 
 function MyListsTab({
-  business, accent, glow, prospects, onProspectsAdded,
+  business, prospects, onProspectsAdded,
 }: {
-  business: Business
-  accent: string
-  glow: string
-  prospects: Prospect[]
-  onProspectsAdded: (ps: Prospect[]) => void
+  business: Business; prospects: Prospect[]; onProspectsAdded: (ps: Prospect[]) => void
 }) {
-  const fileRef                  = useRef<HTMLInputElement>(null)
-  const [csvRows,    setCsvRows] = useState<CsvRow[]>([])
-  const [importing,  setImporting]  = useState(false)
-  const [imported,   setImported]   = useState(false)
-  const [enriching,  setEnriching]  = useState(false)
+  const fileRef                     = useRef<HTMLInputElement>(null)
+  const [csvRows,     setCsvRows]   = useState<CsvRow[]>([])
+  const [importing,   setImporting] = useState(false)
+  const [imported,    setImported]  = useState(false)
+  const [enriching,   setEnriching] = useState(false)
   const [enrichProgress, setEnrichProgress] = useState({ current: 0, total: 0 })
   const [importError, setImportError] = useState('')
 
@@ -938,13 +882,8 @@ function MyListsTab({
     reader.onload = e => {
       const text = e.target?.result as string
       const rows = parseCSV(text)
-      if (rows.length === 0) {
-        setImportError('No valid rows found. Expected columns: Company Name, Contact Name, Title, Email, Phone, Notes')
-        return
-      }
-      setCsvRows(rows)
-      setImported(false)
-      setImportError('')
+      if (rows.length === 0) { setImportError('No valid rows found. Expected columns: Company Name, Contact Name, Title, Email, Phone, Notes'); return }
+      setCsvRows(rows); setImported(false); setImportError('')
     }
     reader.readAsText(file)
   }
@@ -959,13 +898,8 @@ function MyListsTab({
     if (!csvRows.length || importing) return
     setImporting(true)
     const result = await importProspects(business.id, csvRows)
-    if (result.success) {
-      setImported(true)
-      // Refresh prospects by reloading
-      window.location.reload()
-    } else {
-      setImportError(result.error ?? 'Import failed')
-    }
+    if (result.success) { setImported(true); window.location.reload() }
+    else { setImportError(result.error ?? 'Import failed') }
     setImporting(false)
   }
 
@@ -975,15 +909,13 @@ function MyListsTab({
     if (enriching) return
     const targets = listProspects.slice(0, 20)
     if (!targets.length) return
-    setEnriching(true)
-    setEnrichProgress({ current: 0, total: targets.length })
+    setEnriching(true); setEnrichProgress({ current: 0, total: targets.length })
 
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i]
       try {
         const res = await fetch('/api/prospect/enrich', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prospect: { company_name: p.company_name, contact_name: p.contact_name, contact_title: p.contact_title, email: p.email },
             business: { name: business.name, industry: business.industry, ideal_customer: business.ideal_customer, main_service: business.main_service, city: business.city },
@@ -992,104 +924,82 @@ function MyListsTab({
         const data = await res.json()
         if (data.result) {
           await updateProspect(p.id, {
-            company_overview: data.result.company_overview,
-            email_format:     data.result.email_format,
-            pain_points:      data.result.pain_points,
-            pitch_angle:      data.result.pitch_angle,
-            talking_points:   JSON.stringify(data.result.talking_points),
-            enriched:         true,
+            company_overview: data.result.company_overview, email_format: data.result.email_format,
+            pain_points: data.result.pain_points, pitch_angle: data.result.pitch_angle,
+            talking_points: JSON.stringify(data.result.talking_points), enriched: true,
           })
         }
-      } catch { /* continue on error */ }
+      } catch { /* continue */ }
       setEnrichProgress({ current: i + 1, total: targets.length })
     }
-
-    setEnriching(false)
-    window.location.reload()
+    setEnriching(false); window.location.reload()
   }
 
-  const card: React.CSSProperties = {
-    background: '#fff', border: '1px solid rgba(0,0,0,0.07)',
-    borderRadius: 14, overflow: 'hidden',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
-  }
+  const card: React.CSSProperties = { background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px 40px', scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 40px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       {/* Upload area */}
       <div
-        onDrop={handleDrop}
-        onDragOver={e => e.preventDefault()}
+        onDrop={handleDrop} onDragOver={e => e.preventDefault()}
         onClick={() => fileRef.current?.click()}
-        style={{
-          border: `2px dashed rgba(0,0,0,0.12)`,
-          borderRadius: 14, padding: '28px 24px',
-          textAlign: 'center', cursor: 'pointer',
-          marginBottom: 24, transition: 'all 0.15s',
-          background: '#fff',
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = accent; (e.currentTarget as HTMLDivElement).style.background = glow }}
-        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(0,0,0,0.12)'; (e.currentTarget as HTMLDivElement).style.background = '#fff' }}
+        style={{ border: `2px dashed ${DS.outlineBorder}`, borderRadius: 10, padding: '24px', textAlign: 'center', cursor: 'pointer', marginBottom: 20, transition: 'all 0.15s', background: DS.cardBg }}
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = DS.primary; (e.currentTarget as HTMLDivElement).style.background = DS.accentLight }}
+        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = DS.outlineBorder; (e.currentTarget as HTMLDivElement).style.background = DS.cardBg }}
       >
         <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
-        <Upload size={22} color="#A1A1AA" style={{ margin: '0 auto 10px' }} />
-        <p style={{ fontSize: 14, fontWeight: 600, color: '#09090B', marginBottom: 4 }}>Drop a CSV file or click to upload</p>
-        <p style={{ fontSize: 12.5, color: '#A1A1AA' }}>Columns: Company Name, Contact Name, Title, Email, Phone, Notes</p>
+        <Upload size={20} color={DS.muted} style={{ margin: '0 auto 9px' }} />
+        <p style={{ fontSize: 13.5, fontWeight: 600, color: DS.bodyText, marginBottom: 3 }}>Drop a CSV file or click to upload</p>
+        <p style={{ fontSize: 12, color: DS.secondary }}>Columns: Company Name, Contact Name, Title, Email, Phone, Notes</p>
       </div>
 
       {importError && (
-        <div style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.15)', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
-          <p style={{ fontSize: 13, color: '#DC2626', fontWeight: 500 }}>⚠ {importError}</p>
+        <div style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.14)', borderRadius: 9, padding: '10px 13px', marginBottom: 14 }}>
+          <p style={{ fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {importError}</p>
         </div>
       )}
 
-      {/* CSV preview */}
       {csvRows.length > 0 && !imported && (
-        <div style={{ ...card, marginBottom: 24 }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <p style={{ fontSize: 13, fontWeight: 700, color: '#09090B' }}>{csvRows.length} rows ready to import</p>
+        <div style={{ ...card, marginBottom: 20 }}>
+          <div style={{ padding: '13px 16px', borderBottom: `1px solid ${DS.cardBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: DS.bodyText }}>{csvRows.length} rows ready to import</p>
             <button
-              onClick={doImport}
-              disabled={importing}
+              onClick={doImport} disabled={importing}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 18px', borderRadius: 8, border: 'none',
-                background: importing ? '#E4E4E7' : accent,
-                color: 'white', fontSize: 12.5, fontWeight: 600,
-                cursor: importing ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', minHeight: 36,
-                boxShadow: importing ? 'none' : `0 2px 8px ${glow}`,
+                display: 'flex', alignItems: 'center', gap: 5, padding: '7px 16px', borderRadius: 7, border: 'none',
+                background: importing ? '#E4E4E7' : DS.primary, color: 'white', fontSize: 12, fontWeight: 600,
+                cursor: importing ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                boxShadow: importing ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
               }}
             >
-              {importing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={12} />}
+              {importing ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={11} />}
               {importing ? 'Importing…' : `Import All ${csvRows.length} rows`}
             </button>
           </div>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
-                <tr style={{ background: '#F4F4F5' }}>
+                <tr style={{ background: DS.accentMid }}>
                   {['Company', 'Contact', 'Title', 'Email', 'Phone'].map(h => (
-                    <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, color: '#71717A', fontSize: 11, letterSpacing: '0.4px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding: '7px 13px', textAlign: 'left', fontWeight: 700, color: DS.secondary, fontSize: 10.5, letterSpacing: '0.4px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {csvRows.slice(0, 8).map((row, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid rgba(0,0,0,0.045)' }}>
-                    <td style={{ padding: '9px 14px', color: '#09090B', fontWeight: 500, whiteSpace: 'nowrap' }}>{row.company_name}</td>
-                    <td style={{ padding: '9px 14px', color: '#52525B', whiteSpace: 'nowrap' }}>{row.contact_name}</td>
-                    <td style={{ padding: '9px 14px', color: '#71717A', whiteSpace: 'nowrap' }}>{row.contact_title}</td>
-                    <td style={{ padding: '9px 14px', color: '#71717A', whiteSpace: 'nowrap' }}>{row.email}</td>
-                    <td style={{ padding: '9px 14px', color: '#71717A', whiteSpace: 'nowrap' }}>{row.phone}</td>
+                  <tr key={i} style={{ borderTop: `1px solid ${DS.cardBorder}` }}>
+                    <td style={{ padding: '8px 13px', color: DS.bodyText, fontWeight: 500, whiteSpace: 'nowrap' }}>{row.company_name}</td>
+                    <td style={{ padding: '8px 13px', color: DS.secondary, whiteSpace: 'nowrap' }}>{row.contact_name}</td>
+                    <td style={{ padding: '8px 13px', color: DS.secondary, whiteSpace: 'nowrap' }}>{row.contact_title}</td>
+                    <td style={{ padding: '8px 13px', color: DS.secondary, whiteSpace: 'nowrap' }}>{row.email}</td>
+                    <td style={{ padding: '8px 13px', color: DS.secondary, whiteSpace: 'nowrap' }}>{row.phone}</td>
                   </tr>
                 ))}
                 {csvRows.length > 8 && (
-                  <tr style={{ borderTop: '1px solid rgba(0,0,0,0.045)' }}>
-                    <td colSpan={5} style={{ padding: '9px 14px', color: '#A1A1AA', fontSize: 12 }}>
-                      +{csvRows.length - 8} more rows…
-                    </td>
+                  <tr style={{ borderTop: `1px solid ${DS.cardBorder}` }}>
+                    <td colSpan={5} style={{ padding: '8px 13px', color: DS.muted, fontSize: 11.5 }}>+{csvRows.length - 8} more rows…</td>
                   </tr>
                 )}
               </tbody>
@@ -1098,45 +1008,33 @@ function MyListsTab({
         </div>
       )}
 
-      {/* Imported prospects */}
       {listProspects.length > 0 && (
-        <div style={{ ...card }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div style={card}>
+          <div style={{ padding: '13px 16px', borderBottom: `1px solid ${DS.cardBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <div>
-              <p style={{ fontSize: 13, fontWeight: 700, color: '#09090B' }}>{listProspects.length} prospects need enrichment</p>
-              {enriching && (
-                <p style={{ fontSize: 12, color: accent, fontWeight: 600, marginTop: 2 }}>
-                  Enriching {enrichProgress.current} of {enrichProgress.total}…
-                </p>
-              )}
+              <p style={{ fontSize: 13, fontWeight: 700, color: DS.bodyText }}>{listProspects.length} prospects need enrichment</p>
+              {enriching && <p style={{ fontSize: 11.5, color: DS.primary, fontWeight: 600, marginTop: 2 }}>Enriching {enrichProgress.current} of {enrichProgress.total}…</p>}
             </div>
             <button
-              onClick={enrichAll}
-              disabled={enriching}
+              onClick={enrichAll} disabled={enriching}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 18px', borderRadius: 8, border: 'none',
-                background: enriching ? '#E4E4E7' : '#09090B',
-                color: 'white', fontSize: 12.5, fontWeight: 600,
-                cursor: enriching ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', minHeight: 36,
+                display: 'flex', alignItems: 'center', gap: 5, padding: '7px 16px', borderRadius: 7, border: 'none',
+                background: enriching ? '#E4E4E7' : DS.bodyText, color: 'white', fontSize: 12, fontWeight: 600,
+                cursor: enriching ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
               }}
             >
-              {enriching
-                ? <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Enriching {enrichProgress.current}/{enrichProgress.total}</>
-                : <><Bot size={12} /> Enrich with AI</>
-              }
+              {enriching ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Enriching {enrichProgress.current}/{enrichProgress.total}</> : <><Bot size={11} /> Enrich with AI</>}
             </button>
           </div>
           {listProspects.slice(0, 12).map((p, i) => (
-            <div key={p.id} style={{ padding: '11px 18px', borderTop: i > 0 ? '1px solid rgba(0,0,0,0.045)' : undefined, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div key={p.id} style={{ padding: '10px 16px', borderTop: i > 0 ? `1px solid ${DS.cardBorder}` : undefined, display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: '#09090B' }}>{p.company_name}</p>
-                {p.contact_name && <p style={{ fontSize: 12, color: '#71717A' }}>{p.contact_name}{p.contact_title ? ` · ${p.contact_title}` : ''}</p>}
+                <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText }}>{p.company_name}</p>
+                {p.contact_name && <p style={{ fontSize: 11.5, color: DS.secondary }}>{p.contact_name}{p.contact_title ? ` · ${p.contact_title}` : ''}</p>}
               </div>
               {p.enriched
-                ? <span style={{ fontSize: 10, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.10)', padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>✦ Enriched</span>
-                : <span style={{ fontSize: 10, fontWeight: 600, color: '#A1A1AA', background: '#F4F4F5', padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>Not enriched</span>
+                ? <span style={{ fontSize: 9.5, fontWeight: 700, color: DS.primary, background: DS.accentLight, padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>✦ Enriched</span>
+                : <span style={{ fontSize: 9.5, fontWeight: 600, color: DS.muted, background: DS.pageBg, padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>Not enriched</span>
               }
             </div>
           ))}
@@ -1144,33 +1042,28 @@ function MyListsTab({
       )}
 
       {listProspects.length === 0 && csvRows.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '32px 0', color: '#A1A1AA' }}>
-          <Upload size={28} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
-          <p style={{ fontSize: 14, fontWeight: 500 }}>Upload a CSV to import prospects in bulk</p>
+        <div style={{ textAlign: 'center', padding: '32px 0', color: DS.muted }}>
+          <Upload size={26} style={{ margin: '0 auto 9px', opacity: 0.5 }} />
+          <p style={{ fontSize: 13.5, fontWeight: 500 }}>Upload a CSV to import prospects in bulk</p>
         </div>
       )}
-
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
 
-// ─── Pipeline Tab ─────────────────────────────────────────────────────────────
+// ── Pipeline Tab ──────────────────────────────────────────────────────────────
 
 function PipelineTab({
-  business, accent, glow, prospects, onStageChange, onSelect,
+  business, prospects, onStageChange, onSelect,
 }: {
-  business: Business
-  accent: string
-  glow: string
-  prospects: Prospect[]
+  business: Business; prospects: Prospect[]
   onStageChange: (id: string, stage: ProspectStage) => void
   onSelect: (p: Prospect) => void
 }) {
   const router = useRouter()
 
   const move = async (p: Prospect, dir: 'back' | 'forward') => {
-    const idx = STAGES.indexOf(p.stage)
+    const idx  = STAGES.indexOf(p.stage)
     const next = dir === 'forward' ? idx + 1 : idx - 1
     if (next < 0 || next >= STAGES.length) return
     const newStage = STAGES[next]
@@ -1182,25 +1075,23 @@ function PipelineTab({
     const prompt = [
       `Help me with this prospect:`,
       `Company: ${p.company_name}`,
-      p.contact_name  ? `Contact: ${p.contact_name}, ${p.contact_title}` : '',
+      p.contact_name ? `Contact: ${p.contact_name}, ${p.contact_title}` : '',
       `Stage: ${p.stage}`,
-      p.pain_points   ? `Pain points: ${p.pain_points}` : '',
-      p.pitch_angle   ? `Pitch angle: ${p.pitch_angle}` : '',
+      p.pain_points  ? `Pain points: ${p.pain_points}` : '',
+      p.pitch_angle  ? `Pitch angle: ${p.pitch_angle}` : '',
       `\nWhat's my best next move?`,
     ].filter(Boolean).join('\n')
     router.push(`/dashboard/agent?prompt=${encodeURIComponent(prompt)}`)
   }
 
-  const [draftFor,    setDraftFor]    = useState<Prospect | null>(null)
-  const [draftEmail,  setDraftEmail]  = useState<DraftEmail | null>(null)
-  const [draftLoading,setDraftLoading]= useState(false)
+  const [draftFor,     setDraftFor]     = useState<Prospect | null>(null)
+  const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
+  const [draftLoading, setDraftLoading] = useState(false)
 
   const draftEmailFor = async (p: Prospect) => {
-    setDraftFor(p)
-    setDraftLoading(true)
+    setDraftFor(p); setDraftLoading(true)
     const res = await fetch('/api/prospect/draft-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prospect: p, business }),
     })
     const data = await res.json()
@@ -1209,16 +1100,16 @@ function PipelineTab({
   }
 
   const arrBtn: React.CSSProperties = {
-    width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(0,0,0,0.10)',
-    background: '#F4F4F5', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    cursor: 'pointer', color: '#52525B', flexShrink: 0, transition: 'all 0.15s',
+    width: 24, height: 24, borderRadius: 5, border: `1px solid ${DS.cardBorder}`,
+    background: DS.inputBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', color: DS.secondary, flexShrink: 0, transition: 'all 0.15s',
   }
 
   return (
     <>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 28px 36px', scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px 32px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
         <style>{`
-          .prospect-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+          .prospect-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
           @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         `}</style>
 
@@ -1226,11 +1117,11 @@ function PipelineTab({
           const stageProspects = prospects.filter(p => p.stage === stage)
           const st = STAGE_STYLE[stage]
           return (
-            <div key={stage} style={{ marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: st.color, letterSpacing: '0.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{stage}</span>
-                <div style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.07)' }} />
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: st.color, background: st.bg, border: '1px solid rgba(0,0,0,0.07)', padding: '1px 8px', borderRadius: 20 }}>
+            <div key={stage} style={{ marginBottom: 5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 0' }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: st.color, letterSpacing: '0.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{stage}</span>
+                <div style={{ flex: 1, height: 1, background: DS.cardBorder }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, border: `1px solid ${DS.cardBorder}`, padding: '1px 8px', borderRadius: 20 }}>
                   {stageProspects.length}
                 </span>
               </div>
@@ -1243,49 +1134,38 @@ function PipelineTab({
                       <div
                         key={p.id}
                         onClick={() => onSelect(p)}
-                        style={{
-                          background: '#fff', border: '1px solid rgba(0,0,0,0.07)',
-                          borderRadius: 13, overflow: 'hidden', cursor: 'pointer',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
-                          transition: 'box-shadow 0.15s, transform 0.15s',
-                        }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 12px rgba(0,0,0,0.10)'; (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-1px)' }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.07)'; (e.currentTarget as HTMLDivElement).style.transform = 'none' }}
+                        style={{ background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, overflow: 'hidden', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s' }}
+                        onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = DS.cardHover; el.style.boxShadow = '0 3px 10px rgba(29,158,117,0.10)'; el.style.transform = 'translateY(-1px)' }}
+                        onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = DS.cardBorder; el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)'; el.style.transform = 'none' }}
                       >
-                        <div style={{ height: 3, background: st.color, opacity: 0.5 }} />
-                        <div style={{ padding: '13px 14px' }}>
-                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <p style={{ fontSize: 13, fontWeight: 600, color: '#09090B', letterSpacing: '-0.2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{p.company_name}</p>
-                            {p.enriched && <span style={{ fontSize: 9, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.10)', padding: '1px 6px', borderRadius: 10, flexShrink: 0 }}>✦</span>}
+                        <div style={{ height: 3, background: st.color, opacity: 0.6 }} />
+                        <div style={{ padding: '11px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 3 }}>
+                            <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{p.company_name}</p>
+                            {p.enriched && <span style={{ fontSize: 9, fontWeight: 700, color: DS.primary, background: DS.accentLight, padding: '1px 5px', borderRadius: 10, flexShrink: 0 }}>✦</span>}
                           </div>
                           {p.contact_name && (
-                            <p style={{ fontSize: 11.5, color: '#71717A', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <p style={{ fontSize: 11, color: DS.secondary, marginBottom: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {p.contact_name}{p.contact_title ? ` · ${p.contact_title}` : ''}
                             </p>
                           )}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }} onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 4 }}>
-                              <button onClick={() => move(p, 'back')} disabled={stageIdx === 0} style={{ ...arrBtn, color: stageIdx === 0 ? '#D4D4D8' : '#52525B', cursor: stageIdx === 0 ? 'not-allowed' : 'pointer' }} aria-label="Move back">
-                                <ChevronLeft size={12} />
+                              <button onClick={() => move(p, 'back')} disabled={stageIdx === 0} style={{ ...arrBtn, color: stageIdx === 0 ? DS.muted : DS.secondary, cursor: stageIdx === 0 ? 'not-allowed' : 'pointer' }} aria-label="Move back">
+                                <ChevronLeft size={11} />
                               </button>
-                              <button onClick={() => move(p, 'forward')} disabled={stageIdx === STAGES.length - 1} style={{ ...arrBtn, color: stageIdx === STAGES.length - 1 ? '#D4D4D8' : '#52525B', cursor: stageIdx === STAGES.length - 1 ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
-                                <ChevronRight size={12} />
+                              <button onClick={() => move(p, 'forward')} disabled={stageIdx === STAGES.length - 1} style={{ ...arrBtn, color: stageIdx === STAGES.length - 1 ? DS.muted : DS.secondary, cursor: stageIdx === STAGES.length - 1 ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
+                                <ChevronRight size={11} />
                               </button>
                             </div>
                             <div style={{ display: 'flex', gap: 4 }}>
-                              <button
-                                onClick={() => draftEmailFor(p)}
-                                disabled={draftLoading && draftFor?.id === p.id}
-                                style={{ ...arrBtn, gap: 3, padding: '0 8px', width: 'auto', fontSize: 11, fontWeight: 600, color: '#52525B' }}
-                              >
-                                {draftLoading && draftFor?.id === p.id
-                                  ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
-                                  : <Mail size={10} />
-                                }
+                              <button onClick={() => draftEmailFor(p)} disabled={draftLoading && draftFor?.id === p.id}
+                                style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
+                                {draftLoading && draftFor?.id === p.id ? <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={9} />}
                                 Email
                               </button>
-                              <button onClick={() => openCoach(p)} style={{ ...arrBtn, gap: 3, padding: '0 8px', width: 'auto', fontSize: 11, fontWeight: 600, color: '#52525B' }}>
-                                <Bot size={10} /> Coach
+                              <button onClick={() => openCoach(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
+                                <Bot size={9} /> Coach
                               </button>
                             </div>
                           </div>
@@ -1295,21 +1175,20 @@ function PipelineTab({
                   })}
                 </div>
               ) : (
-                <div style={{ border: '1.5px dashed rgba(0,0,0,0.07)', borderRadius: 11, padding: '11px 14px', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, color: '#D4D4D8' }}>No prospects in {stage}</span>
+                <div style={{ border: `1.5px dashed ${DS.cardBorder}`, borderRadius: 9, padding: '10px 13px', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11.5, color: DS.muted }}>No prospects in {stage}</span>
                 </div>
               )}
             </div>
           )
         })}
       </div>
-
       {draftEmail && <EmailModal email={draftEmail} onClose={() => { setDraftEmail(null); setDraftFor(null) }} />}
     </>
   )
 }
 
-// ─── Prospects View ───────────────────────────────────────────────────────────
+// ── Prospects View ────────────────────────────────────────────────────────────
 
 type Tab = 'search' | 'lists' | 'pipeline'
 
@@ -1320,16 +1199,13 @@ export function ProspectsView({
   business: Business
   initialProspects: Prospect[]
 }) {
-  const accent = getAccent(business.trade_type)
-  const glow   = getGlow(business.trade_type)
+  const [activeTab, setActiveTab] = useState<Tab>('search')
+  const [prospects, setProspects] = useState<Prospect[]>(initialProspects)
+  const [selected,  setSelected]  = useState<Prospect | null>(null)
 
-  const [activeTab,  setActiveTab]  = useState<Tab>('search')
-  const [prospects,  setProspects]  = useState<Prospect[]>(initialProspects)
-  const [selected,   setSelected]   = useState<Prospect | null>(null)
-
-  const addProspects = (ps: Prospect[]) => setProspects(prev => [...ps, ...prev])
-  const updateLocal  = (p: Prospect) => setProspects(prev => prev.map(x => x.id === p.id ? p : x))
-  const changeStage  = (id: string, stage: ProspectStage) =>
+  const addProspects  = (ps: Prospect[]) => setProspects(prev => [...ps, ...prev])
+  const updateLocal   = (p: Prospect)   => setProspects(prev => prev.map(x => x.id === p.id ? p : x))
+  const changeStage   = (id: string, stage: ProspectStage) =>
     setProspects(prev => prev.map(p => p.id === id ? { ...p, stage } : p))
 
   const TABS: { id: Tab; label: string; icon: typeof Search }[] = [
@@ -1341,17 +1217,17 @@ export function ProspectsView({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Page header */}
+      {/* Page header + tabs */}
       <div style={{
-        padding: '20px 28px 0', flexShrink: 0,
-        borderBottom: '1px solid rgba(0,0,0,0.07)',
-        background: '#FFFFFF',
+        padding: '16px 24px 0', flexShrink: 0,
+        borderBottom: `1px solid ${DS.cardBorder}`,
+        background: DS.cardBg,
       }}>
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 3 }}>
+        <div style={{ marginBottom: 14 }}>
+          <p style={{ fontSize: 10, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 2 }}>
             {business.name}
           </p>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#09090B', letterSpacing: '-0.5px' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.4px' }}>
             Prospects
           </h1>
         </div>
@@ -1366,19 +1242,19 @@ export function ProspectsView({
                 onClick={() => setActiveTab(id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '9px 16px', borderRadius: '8px 8px 0 0',
-                  border: 'none', background: active ? '#FAFAFA' : 'transparent',
-                  color: active ? accent : '#71717A',
-                  fontSize: 13, fontWeight: active ? 700 : 500,
+                  padding: '8px 14px', borderRadius: '7px 7px 0 0',
+                  border: 'none', background: active ? DS.pageBg : 'transparent',
+                  color: active ? DS.primary : DS.secondary,
+                  fontSize: 12.5, fontWeight: active ? 700 : 500,
                   cursor: 'pointer', fontFamily: 'inherit',
-                  borderBottom: active ? `2px solid ${accent}` : '2px solid transparent',
+                  borderBottom: active ? `2px solid ${DS.primary}` : '2px solid transparent',
                   transition: 'all 0.15s', marginBottom: -1,
                 }}
               >
-                <Icon size={13} />
+                <Icon size={12} />
                 {label}
                 {id === 'pipeline' && prospects.length > 0 && (
-                  <span style={{ fontSize: 10, fontWeight: 700, color: active ? accent : '#A1A1AA', background: active ? glow : '#F4F4F5', padding: '1px 6px', borderRadius: 20 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: active ? DS.primary : DS.muted, background: active ? DS.accentLight : DS.pageBg, padding: '1px 6px', borderRadius: 20 }}>
                     {prospects.length}
                   </span>
                 )}
@@ -1390,16 +1266,15 @@ export function ProspectsView({
 
       {/* Tab content */}
       {activeTab === 'search' && (
-        <AISearchTab business={business} accent={accent} glow={glow} prospects={prospects} onProspectsAdded={addProspects} />
+        <AISearchTab business={business} prospects={prospects} onProspectsAdded={addProspects} />
       )}
       {activeTab === 'lists' && (
-        <MyListsTab business={business} accent={accent} glow={glow} prospects={prospects} onProspectsAdded={ps => setProspects(prev => [...ps, ...prev])} />
+        <MyListsTab business={business} prospects={prospects} onProspectsAdded={ps => setProspects(prev => [...ps, ...prev])} />
       )}
       {activeTab === 'pipeline' && (
-        <PipelineTab business={business} accent={accent} glow={glow} prospects={prospects} onStageChange={changeStage} onSelect={setSelected} />
+        <PipelineTab business={business} prospects={prospects} onStageChange={changeStage} onSelect={setSelected} />
       )}
 
-      {/* Slide-over detail */}
       {selected && (
         <ProspectDetail
           prospect={selected}

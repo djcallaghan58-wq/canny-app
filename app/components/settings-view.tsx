@@ -3,55 +3,38 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Settings } from 'lucide-react'
-import { getAccent, getGlow } from '@/lib/supabase'
 import type { Business } from '@/lib/supabase'
 import { updateBusiness, inviteTeamMember } from '@/app/actions/business'
 
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const DS = {
+  pageBg:       '#F7F9F8',
+  cardBg:       '#FFFFFF',
+  cardBorder:   '#E0EBE5',
+  bodyText:     '#085041',
+  secondary:    '#6B8C7E',
+  muted:        '#9FD4C0',
+  primary:      '#1D9E75',
+  primaryGlow:  'rgba(29,158,117,0.15)',
+  accentLight:  '#E1F5EE',
+  outlineBorder:'#C2D6CC',
+  outlineText:  '#4A7A6A',
+  inputBg:      '#F7F9F8',
+}
+
 const FIELDS = [
-  {
-    key:         'name' as const,
-    label:       'Business Name',
-    placeholder: 'e.g. Miller\'s HVAC & Cooling',
-    type:        'text',
-  },
-  {
-    key:         'industry' as const,
-    label:       'What does your business do?',
-    placeholder: 'e.g. HVAC, Apparel, Landscaping, Staffing',
-    type:        'text',
-  },
-  {
-    key:         'ideal_customer' as const,
-    label:       'Who is your ideal customer?',
-    placeholder: 'e.g. Sports teams and businesses that need custom apparel',
-    type:        'text',
-  },
-  {
-    key:         'main_service' as const,
-    label:       'What is your main service or product?',
-    placeholder: 'e.g. Custom t-shirts, uniforms, and branded merchandise',
-    type:        'text',
-  },
-  {
-    key:         'city' as const,
-    label:       'City',
-    placeholder: 'e.g. Phoenix, AZ',
-    type:        'text',
-  },
-  {
-    key:         'phone' as const,
-    label:       'Phone',
-    placeholder: 'e.g. (602) 555-0123',
-    type:        'tel',
-  },
+  { key: 'name'           as const, label: 'Business Name',                  placeholder: "e.g. Miller's HVAC & Cooling",                     type: 'text' },
+  { key: 'industry'       as const, label: 'What does your business do?',    placeholder: 'e.g. HVAC, Apparel, Landscaping, Staffing',         type: 'text' },
+  { key: 'ideal_customer' as const, label: 'Who is your ideal customer?',    placeholder: 'e.g. Sports teams and businesses that need apparel', type: 'text' },
+  { key: 'main_service'   as const, label: 'What is your main service?',     placeholder: 'e.g. Custom t-shirts, uniforms, merchandise',       type: 'text' },
+  { key: 'city'           as const, label: 'City',                           placeholder: 'e.g. Phoenix, AZ',                                 type: 'text' },
+  { key: 'phone'          as const, label: 'Phone',                          placeholder: 'e.g. (602) 555-0123',                              type: 'tel'  },
 ] as const
 
 type FieldKey = typeof FIELDS[number]['key']
 
 export function SettingsView({ business }: { business: Business }) {
   const router = useRouter()
-  const accent = getAccent(business.trade_type)
-  const glow   = getGlow(business.trade_type)
 
   const [form, setForm] = useState<Record<FieldKey, string>>({
     name:           business.name,
@@ -61,8 +44,8 @@ export function SettingsView({ business }: { business: Business }) {
     city:           business.city,
     phone:          business.phone,
   })
-  const [businessDescription,       setBusinessDescription]       = useState(business.business_description       ?? '')
-  const [idealCustomerDescription,  setIdealCustomerDescription]  = useState(business.ideal_customer_description ?? '')
+  const [businessDescription,      setBusinessDescription]      = useState(business.business_description       ?? '')
+  const [idealCustomerDescription, setIdealCustomerDescription] = useState(business.ideal_customer_description ?? '')
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
   const [error,   setError]   = useState('')
@@ -73,29 +56,27 @@ export function SettingsView({ business }: { business: Business }) {
   const [inviteError,   setInviteError]   = useState('')
 
   const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '11px 14px',
-    background: '#F4F4F5', border: '1.5px solid rgba(0,0,0,0.10)',
-    borderRadius: 9, fontSize: 13.5, color: '#09090B',
+    width: '100%', padding: '10px 13px',
+    background: DS.inputBg, border: `1.5px solid ${DS.outlineBorder}`,
+    borderRadius: 7, fontSize: 13.5, color: DS.bodyText,
     outline: 'none', fontFamily: 'inherit',
     transition: 'border-color 0.15s, box-shadow 0.15s',
   }
 
   const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    e.target.style.borderColor = accent
-    e.target.style.boxShadow = `0 0 0 3px ${glow}`
-    e.target.style.background = '#fff'
+    e.target.style.borderColor = DS.primary
+    e.target.style.boxShadow   = `0 0 0 3px ${DS.primaryGlow}`
+    e.target.style.background  = '#fff'
   }
   const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    e.target.style.borderColor = 'rgba(0,0,0,0.10)'
-    e.target.style.boxShadow = 'none'
-    e.target.style.background = '#F4F4F5'
+    e.target.style.borderColor = DS.outlineBorder
+    e.target.style.boxShadow   = 'none'
+    e.target.style.background  = DS.inputBg
   }
 
   const handleInvite = async () => {
     if (!inviteEmail.trim() || inviting) return
-    setInviting(true)
-    setInviteSuccess('')
-    setInviteError('')
+    setInviting(true); setInviteSuccess(''); setInviteError('')
     const result = await inviteTeamMember(inviteEmail.trim())
     setInviting(false)
     if (result.success) {
@@ -108,77 +89,73 @@ export function SettingsView({ business }: { business: Business }) {
 
   const handleSave = async () => {
     if (saving) return
-    setSaving(true)
-    setSaved(false)
-    setError('')
+    setSaving(true); setSaved(false); setError('')
 
     const result = await updateBusiness({
-      name:                        form.name.trim()                      || undefined,
-      industry:                    form.industry.trim()                   || undefined,
-      ideal_customer:              form.ideal_customer.trim()             || undefined,
-      main_service:                form.main_service.trim()               || undefined,
-      city:                        form.city.trim()                       || undefined,
-      phone:                       form.phone.trim()                      || undefined,
-      business_description:        businessDescription.trim()             || undefined,
-      ideal_customer_description:  idealCustomerDescription.trim()        || undefined,
+      name:                       form.name.trim()                     || undefined,
+      industry:                   form.industry.trim()                  || undefined,
+      ideal_customer:             form.ideal_customer.trim()            || undefined,
+      main_service:               form.main_service.trim()              || undefined,
+      city:                       form.city.trim()                      || undefined,
+      phone:                      form.phone.trim()                     || undefined,
+      business_description:       businessDescription.trim()            || undefined,
+      ideal_customer_description: idealCustomerDescription.trim()       || undefined,
     })
 
     setSaving(false)
-
-    if (!result.success) {
-      setError(result.error ?? 'Something went wrong.')
-      return
-    }
-
+    if (!result.success) { setError(result.error ?? 'Something went wrong.'); return }
     setSaved(true)
     router.refresh()
     setTimeout(() => setSaved(false), 3000)
   }
 
+  const sectionCard: React.CSSProperties = {
+    background:   DS.cardBg,
+    border:       `1px solid ${DS.cardBorder}`,
+    borderRadius: 12,
+    padding:      '24px',
+    boxShadow:    '0 1px 3px rgba(0,0,0,0.05)',
+  }
+
   return (
-    <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent' }}>
+    <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
 
       {/* Page header */}
       <div style={{
-        padding: '20px 28px 16px', flexShrink: 0,
-        borderBottom: '1px solid rgba(0,0,0,0.07)',
-        background: '#FFFFFF',
-        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '16px 24px 14px', flexShrink: 0,
+        borderBottom: `1px solid ${DS.cardBorder}`,
+        background: DS.cardBg,
+        display: 'flex', alignItems: 'center', gap: 10,
       }}>
         <div style={{
-          width: 36, height: 36, borderRadius: 10,
-          background: glow, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 32, height: 32, borderRadius: 9,
+          background: DS.accentLight,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <Settings size={18} color={accent} />
+          <Settings size={16} color={DS.primary} />
         </div>
         <div>
-          <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 2 }}>
+          <p style={{ fontSize: 10, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 1 }}>
             {business.name}
           </p>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: '#09090B', letterSpacing: '-0.4px', lineHeight: 1 }}>
+          <h1 style={{ fontSize: 16, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.3px', lineHeight: 1 }}>
             Business Settings
           </h1>
         </div>
       </div>
 
-      <div style={{ padding: '28px', maxWidth: 600 }}>
-        <div style={{
-          background: '#FFFFFF', border: '1px solid rgba(0,0,0,0.07)',
-          borderRadius: 14, padding: '28px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-        }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 20 }}>
+      <div style={{ padding: '24px', maxWidth: 600 }}>
+
+        {/* Business Profile */}
+        <div style={sectionCard}>
+          <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 18 }}>
             Business Profile
           </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {FIELDS.map(({ key, label, placeholder, type }) => (
               <div key={key}>
-                <label style={{
-                  fontSize: 11, fontWeight: 700, color: '#52525B',
-                  letterSpacing: '0.4px', textTransform: 'uppercase',
-                  display: 'block', marginBottom: 6,
-                }}>
+                <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
                   {label}
                 </label>
                 <input
@@ -192,13 +169,8 @@ export function SettingsView({ business }: { business: Business }) {
               </div>
             ))}
 
-            {/* Textarea fields */}
             <div>
-              <label style={{
-                fontSize: 11, fontWeight: 700, color: '#52525B',
-                letterSpacing: '0.4px', textTransform: 'uppercase',
-                display: 'block', marginBottom: 6,
-              }}>
+              <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
                 About Your Business
               </label>
               <textarea
@@ -212,11 +184,7 @@ export function SettingsView({ business }: { business: Business }) {
             </div>
 
             <div>
-              <label style={{
-                fontSize: 11, fontWeight: 700, color: '#52525B',
-                letterSpacing: '0.4px', textTransform: 'uppercase',
-                display: 'block', marginBottom: 6,
-              }}>
+              <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
                 Ideal Customer Description
               </label>
               <textarea
@@ -231,47 +199,41 @@ export function SettingsView({ business }: { business: Business }) {
           </div>
 
           {error && (
-            <p style={{ marginTop: 16, fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {error}</p>
+            <p style={{ marginTop: 14, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {error}</p>
           )}
 
-          <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
             <button
               onClick={handleSave}
               disabled={saving}
               style={{
-                padding: '10px 24px', borderRadius: 9, border: 'none',
-                background: saving ? '#E4E4E7' : accent,
-                color: 'white', fontSize: 13.5, fontWeight: 600,
+                padding: '9px 22px', borderRadius: 6, border: 'none',
+                background: saving ? '#E4E4E7' : DS.primary,
+                color: 'white', fontSize: 12, fontWeight: 600,
                 cursor: saving ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', letterSpacing: '-0.2px',
-                boxShadow: saving ? 'none' : `0 2px 10px ${glow}`,
-                transition: 'all 0.2s', minHeight: 44,
+                fontFamily: 'inherit',
+                boxShadow: saving ? 'none' : `0 2px 10px ${DS.primaryGlow}`,
+                transition: 'all 0.2s', minHeight: 38,
               }}
             >
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
             {saved && (
-              <span style={{ fontSize: 13, color: '#059669', fontWeight: 600 }}>
-                ✓ Saved
-              </span>
+              <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ Saved</span>
             )}
           </div>
         </div>
 
         {/* Team Members */}
-        <div style={{
-          background: '#FFFFFF', border: '1px solid rgba(0,0,0,0.07)',
-          borderRadius: 14, padding: '28px', marginTop: 20,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-        }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 6 }}>
+        <div style={{ ...sectionCard, marginTop: 16 }}>
+          <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>
             Team Members
           </p>
-          <p style={{ fontSize: 13, color: '#71717A', marginBottom: 20 }}>
+          <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 18 }}>
             Invite teammates to collaborate on your pipeline and prospects. They'll see the same data as you.
           </p>
 
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="email"
               placeholder="teammate@company.com"
@@ -285,12 +247,12 @@ export function SettingsView({ business }: { business: Business }) {
               onClick={handleInvite}
               disabled={!inviteEmail.trim() || inviting}
               style={{
-                padding: '10px 20px', borderRadius: 9, border: 'none', flexShrink: 0,
-                background: inviteEmail.trim() && !inviting ? accent : '#E4E4E7',
-                color: 'white', fontSize: 13.5, fontWeight: 600,
+                padding: '9px 18px', borderRadius: 6, border: 'none', flexShrink: 0,
+                background: inviteEmail.trim() && !inviting ? DS.primary : '#E4E4E7',
+                color: 'white', fontSize: 12, fontWeight: 600,
                 cursor: inviteEmail.trim() && !inviting ? 'pointer' : 'not-allowed',
-                fontFamily: 'inherit', letterSpacing: '-0.2px',
-                boxShadow: inviteEmail.trim() && !inviting ? `0 2px 10px ${glow}` : 'none',
+                fontFamily: 'inherit',
+                boxShadow: inviteEmail.trim() && !inviting ? `0 2px 10px ${DS.primaryGlow}` : 'none',
                 transition: 'all 0.2s', whiteSpace: 'nowrap' as const,
               }}
             >
@@ -299,10 +261,10 @@ export function SettingsView({ business }: { business: Business }) {
           </div>
 
           {inviteSuccess && (
-            <p style={{ marginTop: 10, fontSize: 12.5, color: '#059669', fontWeight: 500 }}>✓ {inviteSuccess}</p>
+            <p style={{ marginTop: 10, fontSize: 12, color: DS.primary, fontWeight: 500 }}>✓ {inviteSuccess}</p>
           )}
           {inviteError && (
-            <p style={{ marginTop: 10, fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {inviteError}</p>
+            <p style={{ marginTop: 10, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {inviteError}</p>
           )}
         </div>
       </div>
