@@ -180,25 +180,43 @@ export async function inviteTeamMember(email: string): Promise<{ success: boolea
     if (!business) return { success: false, error: 'Only the business owner can invite team members.' }
 
     const clerk = await clerkClient()
-    let orgId = business.org_id
 
-    // Link existing Clerk org or create one on-demand
-    if (!orgId) {
+    // Resolve a valid org ID, refreshing if the stored one is stale (e.g. from dev instance)
+    const resolveOrgId = async (): Promise<string> => {
       const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 1 })
       const existingOrgId = memberships.data[0]?.organization?.id ?? null
-      orgId = existingOrgId ?? (await clerk.organizations.createOrganization({
+      const id = existingOrgId ?? (await clerk.organizations.createOrganization({
         name: business.name,
         createdBy: userId,
       })).id
-      await supabase.from('businesses').update({ org_id: orgId }).eq('id', business.id)
+      await supabase.from('businesses').update({ org_id: id }).eq('id', business.id)
+      return id
     }
 
-    await clerk.organizations.createOrganizationInvitation({
-      organizationId: orgId,
-      emailAddress: email.trim(),
-      inviterUserId: userId,
-      role: 'basic_member',
-    })
+    let orgId = business.org_id ?? await resolveOrgId()
+
+    try {
+      await clerk.organizations.createOrganizationInvitation({
+        organizationId: orgId,
+        emailAddress: email.trim(),
+        inviterUserId: userId,
+        role: 'basic_member',
+      })
+    } catch (inviteErr) {
+      const msg = inviteErr instanceof Error ? inviteErr.message.toLowerCase() : ''
+      // Stale org_id (e.g. from dev Clerk instance) — resolve fresh and retry once
+      if (msg.includes('not found') || msg.includes('404') || msg.includes('no such')) {
+        orgId = await resolveOrgId()
+        await clerk.organizations.createOrganizationInvitation({
+          organizationId: orgId,
+          emailAddress: email.trim(),
+          inviterUserId: userId,
+          role: 'basic_member',
+        })
+      } else {
+        throw inviteErr
+      }
+    }
 
     return { success: true }
   } catch (e) {
