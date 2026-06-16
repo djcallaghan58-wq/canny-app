@@ -159,18 +159,19 @@ export async function moveToLeadsPipeline(
     const { data: lead, error: leadError } = await supabase
       .from('leads')
       .insert({
-        business_id: businessId,
+        business_id:   businessId,
         customer_name: prospect.contact_name || prospect.company_name,
         customer_email: prospect.email ?? '',
         customer_phone: prospect.phone ?? '',
-        service_type: prospect.company_overview ? prospect.company_overview.slice(0, 80) : '',
-        urgency: 'Medium',
-        stage: 'New Lead',
-        value: prospect.value ?? 0,
+        service_type:  prospect.company_overview ? prospect.company_overview.slice(0, 80) : '',
+        urgency:       'Medium',
+        stage:         'New Lead',
+        source:        'prospecting',
+        value:         prospect.value ?? 0,
         notes: [
-          prospect.pain_points  ? `Pain points: ${prospect.pain_points}` : '',
-          prospect.pitch_angle  ? `Pitch: ${prospect.pitch_angle}` : '',
-          prospect.notes        ? prospect.notes : '',
+          prospect.pain_points ? `Pain points: ${prospect.pain_points}` : '',
+          prospect.pitch_angle ? `Pitch: ${prospect.pitch_angle}` : '',
+          prospect.notes       ? prospect.notes : '',
         ].filter(Boolean).join('\n\n'),
       })
       .select('id')

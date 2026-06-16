@@ -11,6 +11,7 @@ import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/su
 import {
   createProspect, updateProspectStage, updateProspect, importProspects,
   saveProspectFromSearch, checkRecentSearch, saveSearch, moveToLeadsPipeline,
+  getProspects,
 } from '@/app/actions/prospects'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -40,7 +41,7 @@ interface BatchResult {
   pain_points: string; pitch_angle: string; email_subject: string; email_body: string
 }
 
-interface DraftEmail { subject: string; body: string; email?: string }
+interface DraftEmail { subject: string; subjectB?: string; body: string; email?: string }
 
 interface CsvRow {
   company_name: string; contact_name: string; contact_title: string
@@ -155,9 +156,15 @@ function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void
         )}
 
         <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 10 }}>
-          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject</p>
+          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject A</p>
           <p style={{ fontSize: 13, color: DS.bodyText, fontWeight: 500 }}>{email.subject}</p>
         </div>
+        {email.subjectB && (
+          <div style={{ background: DS.pageBg, borderRadius: 8, padding: '10px 13px', marginBottom: 10, border: `1px solid ${DS.cardBorder}` }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject B</p>
+            <p style={{ fontSize: 13, color: DS.secondary, fontWeight: 500 }}>{email.subjectB}</p>
+          </div>
+        )}
 
         <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 18 }}>
           <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 7 }}>Body</p>
@@ -479,6 +486,7 @@ function AISearchTab({
   const [addingIdx,     setAddingIdx]     = useState<Set<number>>(new Set())
   const [savingAll,     setSavingAll]     = useState(false)
   const [addedConfirm,  setAddedConfirm]  = useState(false)
+  const [errorToast,    setErrorToast]    = useState<string | null>(null)
   const [emailModal,    setEmailModal]    = useState<DraftEmail | null>(null)
 
   const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -490,28 +498,36 @@ function AISearchTab({
   // Clear poll interval on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
-  // BUG 1: load recent search results from the prospects prop on mount
+  // FIX 2: load recent search results fresh from Supabase on mount
   useEffect(() => {
-    if (results.length > 0 || searching) return
-    const recent = prospects
-      .filter(p => p.source === 'ai_search_batch' || p.source === 'ai_search')
-      .slice(0, 10)
-    if (recent.length === 0) return
-    const batchResults: BatchResult[] = recent.map(p => ({
-      company_name: p.company_name, website: p.website ?? '',
-      location: p.location ?? '', overview: p.company_overview ?? '',
-      contact_name: p.contact_name ?? '', contact_title: p.contact_title ?? '',
-      email_format: p.email_format ?? '', pain_points: p.pain_points ?? '',
-      pitch_angle: p.pitch_angle ?? '', email_subject: '', email_body: '',
-    }))
-    setResults(batchResults)
-    setIsRecentResults(true)
-    const sm = new Map<number, Prospect>()
-    const pi = new Set<number>()
-    recent.forEach((p, i) => { sm.set(i, p); if (p.status === 'pipeline') pi.add(i) })
-    setSavedMap(sm); setInPipelineIdx(pi)
+    const loadRecent = async () => {
+      if (searching) return
+      try {
+        const all    = await getProspects(business.id)
+        const recent = all
+          .filter(p => p.source === 'ai_search_batch' || p.source === 'ai_search')
+          .slice(0, 10)
+        if (!recent.length) return
+        const batchResults: BatchResult[] = recent.map(p => ({
+          company_name:  p.company_name,    website:       p.website ?? '',
+          location:      p.location ?? '',  overview:      p.company_overview ?? '',
+          contact_name:  p.contact_name ?? '', contact_title: p.contact_title ?? '',
+          email_format:  p.email_format ?? '', pain_points:   p.pain_points ?? '',
+          pitch_angle:   p.pitch_angle ?? '', email_subject: '', email_body: '',
+        }))
+        setResults(batchResults)
+        setIsRecentResults(true)
+        const sm = new Map<number, Prospect>()
+        const pi = new Set<number>()
+        recent.forEach((p, i) => { sm.set(i, p); if (p.status === 'pipeline') pi.add(i) })
+        setSavedMap(sm); setInPipelineIdx(pi)
+      } catch (e) {
+        console.error('[Prospects] Failed to load recent results:', e)
+      }
+    }
+    loadRecent()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [business.id])
 
   const stopPolling = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
@@ -582,7 +598,17 @@ function AISearchTab({
         body: JSON.stringify({
           query: text,
           businessId: business.id,
-          business: { name: business.name, industry: business.industry, ideal_customer: business.ideal_customer, main_service: business.main_service, city: business.city },
+          business: {
+            name:                       business.name,
+            industry:                   business.industry,
+            ideal_customer:             business.ideal_customer,
+            ideal_customer_description: business.ideal_customer_description,
+            main_service:               business.main_service,
+            business_description:       business.business_description,
+            city:                       business.city,
+            service_area:               business.service_area,
+            catalog:                    business.catalog,
+          },
           existingCompanies,
         }),
       })
@@ -644,53 +670,89 @@ function AISearchTab({
     setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
   }
 
-  // BUG 2: save prospect (handles dedup) + add to leads pipeline in one step
+  const showError = (msg: string) => {
+    console.error('[Pipeline] ERROR:', msg)
+    setErrorToast(msg)
+    setTimeout(() => setErrorToast(null), 6000)
+  }
+
+  // FIX 1: save prospect + add to leads pipeline with full error surfacing
   const addCardsToPipeline = async (indices: number[]) => {
     const toProcess = indices.filter(i => !inPipelineIdx.has(i))
     if (!toProcess.length) return
     setSavingAll(true)
+    setErrorToast(null)
+    let successCount = 0
 
-    for (const i of toProcess) {
-      const r = results[i]
-      if (!r) { console.warn('[Pipeline] No result at index', i); continue }
+    console.log('[Pipeline] Starting. Business ID:', business.id, '| Indices:', toProcess)
 
-      console.log('[Pipeline] Processing:', r.company_name, '(index', i, ')')
+    try {
+      for (const i of toProcess) {
+        const r = results[i]
+        if (!r) { console.warn('[Pipeline] No result at index', i); continue }
 
-      // Step 1: ensure prospect is in Supabase
-      let prospectId = savedMap.get(i)?.id
-      if (!prospectId) {
-        console.log('[Pipeline] Saving prospect to Supabase:', r.company_name)
-        const saved = await saveProspectFromSearch({
-          business_id: business.id, company_name: r.company_name,
-          contact_name: r.contact_name, contact_title: r.contact_title,
-          email: r.email_format, website: r.website, location: r.location,
-          company_overview: r.overview, email_format: r.email_format,
-          pain_points: r.pain_points, pitch_angle: r.pitch_angle,
-          talking_points: '[]', search_query: query, source: 'ai_search_batch',
-        })
-        console.log('[Pipeline] saveProspectFromSearch result:', saved)
-        if (!saved.prospect) { console.error('[Pipeline] Failed to save prospect:', saved.error); continue }
-        prospectId = saved.prospect.id
-        setSavedMap(prev => new Map(prev).set(i, saved.prospect!))
+        console.log('[Pipeline] Processing:', r.company_name, '(index', i, ')')
+
+        // Step 1: ensure prospect row exists in Supabase
+        let prospectId = savedMap.get(i)?.id
+        if (!prospectId) {
+          console.log('[Pipeline] saveProspectFromSearch payload:', {
+            business_id: business.id, company_name: r.company_name,
+          })
+          try {
+            const saved = await saveProspectFromSearch({
+              business_id:      business.id,
+              company_name:     r.company_name,
+              contact_name:     r.contact_name,
+              contact_title:    r.contact_title,
+              email:            r.email_format,
+              website:          r.website,
+              location:         r.location,
+              company_overview: r.overview,
+              email_format:     r.email_format,
+              pain_points:      r.pain_points,
+              pitch_angle:      r.pitch_angle,
+              talking_points:   '[]',
+              search_query:     query,
+              source:           'ai_search_batch',
+            })
+            console.log('[Pipeline] saveProspectFromSearch →', saved)
+            if (!saved.prospect) {
+              showError(`Could not save ${r.company_name}: ${saved.error ?? 'unknown error'}`)
+              continue
+            }
+            prospectId = saved.prospect.id
+            setSavedMap(prev => new Map(prev).set(i, saved.prospect!))
+          } catch (e) {
+            showError(`Save failed for ${r.company_name}: ${e instanceof Error ? e.message : String(e)}`)
+            continue
+          }
+        }
+
+        // Step 2: create lead in leads table
+        console.log('[Pipeline] moveToLeadsPipeline →', { prospectId, businessId: business.id })
+        try {
+          const pipelineResult = await moveToLeadsPipeline(prospectId, business.id)
+          console.log('[Pipeline] moveToLeadsPipeline result →', pipelineResult)
+          if (pipelineResult.success) {
+            setInPipelineIdx(prev => new Set([...prev, i]))
+            setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
+            successCount++
+          } else {
+            showError(`Pipeline add failed for ${r.company_name}: ${pipelineResult.error ?? 'unknown error'}`)
+          }
+        } catch (e) {
+          showError(`Pipeline error for ${r.company_name}: ${e instanceof Error ? e.message : String(e)}`)
+        }
       }
-
-      // Step 2: move to leads pipeline
-      console.log('[Pipeline] Moving prospect', prospectId, 'to leads pipeline')
-      const result = await moveToLeadsPipeline(prospectId, business.id)
-      console.log('[Pipeline] moveToLeadsPipeline result:', result)
-
-      if (result.success) {
-        setInPipelineIdx(prev => new Set([...prev, i]))
-        setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
-      } else {
-        console.error('[Pipeline] Failed to move to pipeline:', result.error)
+    } finally {
+      setSelectedIdx(new Set())
+      setSavingAll(false)
+      if (successCount > 0) {
+        setAddedConfirm(true)
+        setTimeout(() => setAddedConfirm(false), 2500)
       }
     }
-
-    setSelectedIdx(new Set())
-    setSavingAll(false)
-    setAddedConfirm(true)
-    setTimeout(() => setAddedConfirm(false), 2500)
   }
 
   const addAllToPipeline = (indices?: Set<number>) => {
@@ -714,6 +776,18 @@ function AISearchTab({
         .prospect-card:hover { border-color: #1D9E75 !important; box-shadow: 0 3px 10px rgba(29,158,117,0.10) !important; }
         .prospect-card.selected { border-color: #1D9E75 !important; border-width: 1.5px !important; }
       `}</style>
+
+      {/* Error toast */}
+      {errorToast && (
+        <div style={{
+          background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.20)',
+          borderRadius: 9, padding: '10px 14px', marginBottom: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        }}>
+          <p style={{ fontSize: 12.5, color: '#DC2626', fontWeight: 500 }}>⚠ {errorToast}</p>
+          <button onClick={() => setErrorToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14, lineHeight: 1 }}>×</button>
+        </div>
+      )}
 
       {/* Search bar */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>

@@ -83,6 +83,7 @@ export interface Lead {
   stage: LeadStage
   value: number
   notes: string
+  source: string | null
   created_at: string
   last_contacted_at: string | null
 }

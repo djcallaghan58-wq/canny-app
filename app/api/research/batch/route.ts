@@ -3,11 +3,13 @@ import Anthropic from '@anthropic-ai/sdk'
 import { auth } from '@clerk/nextjs/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { scrapeCompanyContact } from '@/lib/research-scraper'
+import { callAnthropic } from '@/lib/anthropic'
+import { parseDraft } from '@/lib/parse-draft'
 import { stripDashesFromObject } from '@/lib/strip-dashes'
 
-export const maxDuration = 300
-
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+export const maxDuration = 300
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,6 +21,8 @@ interface Business {
   business_description:       string | null
   main_service:               string | null
   city:                       string | null
+  service_area?:              string | null
+  catalog?:                   Array<{ name: string; price: number; unit: string }> | null
 }
 
 export interface BatchResult {
@@ -32,7 +36,53 @@ export interface BatchResult {
   pain_points:   string
   pitch_angle:   string
   email_subject: string
+  email_subject_b?: string
   email_body:    string
+}
+
+// ── Copywriter rules (shared) ─────────────────────────────────────────────────
+
+const WRITING_RULES = [
+  `Writing rules: short sentences. No em dashes or en dashes (— –).`,
+  `No "leverage", "streamline", "seamlessly", "game-changer", "in today's world",`,
+  ` "look no further", "tailored", "cutting-edge", "robust".`,
+  ` Write like a real person who knows this business.`,
+].join('')
+
+function buildEmailPrompt(
+  companyName:   string,
+  contactName:   string | null,
+  painPoints:    string,
+  pitchAngle:    string,
+  business:      Business,
+): string {
+  const catalogText = business.catalog?.slice(0, 3).map(
+    c => `${c.name} ($${c.price} ${c.unit})`
+  ).join(', ')
+
+  return [
+    `Write a cold outreach email to ${contactName ? `${contactName} at ` : ''}${companyName}.`,
+    ``,
+    `Context:`,
+    `- Their pain point: ${painPoints}`,
+    `- Pitch angle: ${pitchAngle}`,
+    business.main_service    ? `- Our service: ${business.main_service}` : '',
+    catalogText              ? `- What we sell: ${catalogText}`          : '',
+    business.business_description ? `- About us: ${business.business_description}` : '',
+    business.service_area    ? `- We serve: ${business.service_area}`   : '',
+    ``,
+    `Rules:`,
+    `- Subject: under 8 words, no punctuation, no dashes`,
+    `- Body: 3-4 sentences max, one specific pain point, one specific pitch, one clear CTA`,
+    `- Sound like a real person, not a marketing bot`,
+    `- Blank line between paragraphs`,
+    ``,
+    `Return EXACTLY this format (no other text):`,
+    `SUBJECT A: [subject line]`,
+    `SUBJECT B: [alternative subject line]`,
+    ``,
+    `[email body]`,
+  ].filter(s => s !== undefined).join('\n')
 }
 
 // ── Step 1: generate target company names ─────────────────────────────────────
@@ -41,6 +91,7 @@ async function generateTargets(
   query:            string,
   business:         Business,
   excludeCompanies: string[],
+  businessId:       string,
 ): Promise<string[]> {
   const excludeNote = excludeCompanies.length > 0
     ? ` Do NOT include any of these already-saved companies: ${excludeCompanies.slice(0, 30).join(', ')}.`
@@ -93,12 +144,17 @@ async function generateTargets(
   return Array.from({ length: 10 }, (_, i) => `${query} company ${i + 1}`)
 }
 
-// ── Step 2: research one prospect ─────────────────────────────────────────────
+// ── Step 2a: research one prospect (company + contact data) ───────────────────
 
-async function researchOneProspect(
-  target:   string,
-  business: Business,
-): Promise<BatchResult | null> {
+async function researchProspectData(
+  target:     string,
+  business:   Business,
+  businessId: string,
+): Promise<{
+  company_name: string; website: string; location: string; overview: string
+  contact_name: string; contact_title: string; email_format: string
+  pain_points: string; pitch_angle: string
+} | null> {
   try {
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
@@ -110,7 +166,7 @@ async function researchOneProspect(
         business.business_description       ? ` About the business: ${business.business_description}.`   : '',
         business.ideal_customer_description ? ` Ideal customer: ${business.ideal_customer_description}.` : '',
         ` Be specific. Use web search, then call return_prospect.`,
-        ` Writing rules: short sentences, no em dashes or en dashes, no words like "leverage" "streamline" "seamlessly" "game-changer" "tailored" "cutting-edge" "robust". Write like a real person who knows this business.`,
+        ` ${WRITING_RULES}`,
       ].join(''),
       tools: [
         { type: 'web_search_20250305' as const, name: 'web_search' },
@@ -123,33 +179,111 @@ async function researchOneProspect(
               company_name:  { type: 'string' },
               website:       { type: 'string' },
               location:      { type: 'string' },
-              overview:      { type: 'string',  description: '1-2 short sentences about what they do. No em dashes.' },
-              contact_name:  { type: 'string',  description: 'Key decision maker full name' },
+              overview:      { type: 'string', description: '1-2 short sentences. No em dashes.' },
+              contact_name:  { type: 'string', description: 'Key decision maker full name' },
               contact_title: { type: 'string' },
-              email_format:  { type: 'string',  description: 'e.g. firstname@company.com' },
-              pain_points:   { type: 'string',  description: 'One specific pain point relevant to our service. Plain English, one sentence.' },
-              pitch_angle:   { type: 'string',  description: 'One sentence, plain English, no fluff. Sounds like a real person wrote it.' },
-              email_subject: { type: 'string',  description: 'Under 8 words, no punctuation, no em dashes.' },
-              email_body:    { type: 'string',  description: '3-4 sentences max. One specific pain point, one specific pitch, one CTA. No em dashes, no buzzwords.' },
+              email_format:  { type: 'string', description: 'e.g. firstname@company.com' },
+              pain_points:   { type: 'string', description: 'One specific pain point, one sentence, plain English.' },
+              pitch_angle:   { type: 'string', description: 'One sentence, plain English, no fluff, sounds human.' },
             },
-            required: ['company_name', 'overview', 'pain_points', 'pitch_angle', 'email_subject', 'email_body'],
+            required: ['company_name', 'overview', 'pain_points', 'pitch_angle'],
           },
         },
       ],
       messages: [{
         role:    'user',
-        content: `Research "${target}". Find contact info, identify a specific pain point relevant to ${business.main_service || 'our services'}, and draft a short cold email. No em dashes anywhere.`,
+        content: `Research "${target}". Find contact info and identify a specific pain point relevant to ${business.main_service || 'our services'}.`,
       }],
     })
 
     const toolCall = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'return_prospect'
     )
-    if (!toolCall) return null
-    return stripDashesFromObject(toolCall.input as Record<string, unknown>) as unknown as BatchResult
+    return toolCall ? (toolCall.input as ReturnType<Awaited<typeof researchProspectData>>) : null
   } catch {
     return null
   }
+}
+
+// ── Step 2b: generate email copy (plain text, parsed with parseDraft) ─────────
+
+async function generateEmailCopy(
+  companyName:  string,
+  contactName:  string | null,
+  painPoints:   string,
+  pitchAngle:   string,
+  business:     Business,
+  businessId:   string,
+): Promise<{ subject: string; subjectB?: string; body: string }> {
+  const fallback = { subject: `Quick question for ${companyName}`, body: pitchAngle }
+  try {
+    const response = await callAnthropic({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: [
+        `You are a B2B copywriter for ${business.name}.`,
+        business.business_description ? ` ${business.business_description}.` : '',
+        ` ${WRITING_RULES}`,
+      ].join(''),
+      messages: [{
+        role:    'user',
+        content: buildEmailPrompt(companyName, contactName, painPoints, pitchAngle, business),
+      }],
+      businessId,
+      endpoint: 'email_copy',
+    })
+
+    const raw = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text).join('')
+
+    return raw.trim() ? parseDraft(raw) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+// ── Combined: research + email ────────────────────────────────────────────────
+
+async function researchOneProspect(
+  target:     string,
+  business:   Business,
+  businessId: string,
+): Promise<BatchResult | null> {
+  // Run researcher + scraper in parallel
+  const [data, scraped] = await Promise.all([
+    researchProspectData(target, business, businessId),
+    scrapeCompanyContact(target, null, business.main_service),
+  ])
+  if (!data) return null
+
+  // Merge scraper contact if researcher came up empty
+  if (!data.contact_name && scraped.name) {
+    data.contact_name  = scraped.name
+    data.contact_title = scraped.title ?? data.contact_title
+  }
+  if (!data.email_format && scraped.email) {
+    data.email_format = scraped.email
+  }
+
+  // Generate email copy separately for better quality
+  const emailCopy = await generateEmailCopy(
+    data.company_name,
+    data.contact_name || null,
+    data.pain_points,
+    data.pitch_angle,
+    business,
+    businessId,
+  )
+
+  const result: BatchResult = {
+    ...data,
+    email_subject:   emailCopy.subject,
+    email_subject_b: emailCopy.subjectB,
+    email_body:      emailCopy.body,
+  }
+
+  return stripDashesFromObject(result as unknown as Record<string, unknown>) as unknown as BatchResult
 }
 
 // ── POST — kick off search, return runId immediately ──────────────────────────
@@ -172,55 +306,32 @@ export async function POST(req: Request) {
   const supabase = createAdminClient()
 
   await supabase.from('agent_runs').insert({
-    id:          runId,
-    business_id: businessId,
-    type:        'batch_search',
-    status:      'running',
-    total_tasks: 10,
-    query,
+    id: runId, business_id: businessId, type: 'batch_search',
+    status: 'running', total_tasks: 10, query,
   })
 
   after(async () => {
     const db = createAdminClient()
     try {
-      // Step 1: identify real target companies
-      const targets = await generateTargets(query, business, existingCompanies)
-
+      const targets = await generateTargets(query, business, existingCompanies, businessId)
       await db.from('agent_runs').update({ total_tasks: targets.length }).eq('id', runId)
 
       const taskRows = targets.map(org => ({
-        id:          crypto.randomUUID(),
-        run_id:      runId,
-        business_id: businessId,
-        org_name:    org,
-        status:      'pending' as const,
+        id: crypto.randomUUID(), run_id: runId,
+        business_id: businessId, org_name: org, status: 'pending' as const,
       }))
       await db.from('agent_tasks').insert(taskRows)
 
-      // Step 2: researcher + scraper run in parallel per company
       let doneCount = 0
       await Promise.all(taskRows.map(async task => {
         await db.from('agent_tasks').update({ status: 'running' }).eq('id', task.id)
+        const result = await researchOneProspect(task.org_name, business, businessId)
 
-        const [researched, scraped] = await Promise.all([
-          researchOneProspect(task.org_name, business),
-          scrapeCompanyContact(task.org_name, null, business.main_service),
-        ])
-
-        if (researched) {
-          // Merge scraper contact if researcher didn't find one
-          if (!researched.contact_name && scraped.name) {
-            researched.contact_name  = scraped.name
-            researched.contact_title = scraped.title ?? researched.contact_title
-          }
-          if (!researched.email_format && scraped.email) {
-            researched.email_format = scraped.email
-          }
-          await db.from('agent_tasks').update({ status: 'completed', result: researched }).eq('id', task.id)
+        if (result) {
+          await db.from('agent_tasks').update({ status: 'completed', result }).eq('id', task.id)
         } else {
           await db.from('agent_tasks').update({ status: 'failed', error: 'Research failed' }).eq('id', task.id)
         }
-
         doneCount++
         if (doneCount >= targets.length) {
           await db.from('agent_runs').update({ status: 'done' }).eq('id', runId)
@@ -234,7 +345,7 @@ export async function POST(req: Request) {
   return Response.json({ runId, total: 10 })
 }
 
-// ── GET — poll for status + completed results ─────────────────────────────────
+// ── GET — poll for status ─────────────────────────────────────────────────────
 
 export async function GET(req: Request) {
   const { userId } = await auth()
@@ -256,8 +367,7 @@ export async function GET(req: Request) {
   const completed = tasks.filter(t => t.status === 'completed').length
   const failed    = tasks.filter(t => t.status === 'failed').length
   const status    = run?.status ?? 'running'
-
-  const results: BatchResult[] = tasks
+  const results   = tasks
     .filter(t => t.status === 'completed' && t.result)
     .map(t => t.result as BatchResult)
 
