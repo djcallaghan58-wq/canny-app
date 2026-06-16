@@ -40,7 +40,7 @@ interface BatchResult {
   pain_points: string; pitch_angle: string; email_subject: string; email_body: string
 }
 
-interface DraftEmail { subject: string; body: string }
+interface DraftEmail { subject: string; body: string; email?: string }
 
 interface CsvRow {
   company_name: string; contact_name: string; contact_title: string
@@ -119,13 +119,13 @@ function getInitials(name: string): string {
 // ── Draft Email Modal ─────────────────────────────────────────────────────────
 
 function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void }) {
-  const [copied, setCopied] = useState(false)
-  const full = `Subject: ${email.subject}\n\n${email.body}`
-
-  const copy = () => {
-    navigator.clipboard.writeText(full)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const openMailto = () => {
+    const to      = email.email ?? ''
+    const subject = encodeURIComponent(email.subject)
+    const body    = encodeURIComponent(email.body)
+    const mailto  = `mailto:${to}?subject=${subject}&body=${body}`
+    window.open(mailto, '_blank')
+    onClose()
   }
 
   return (
@@ -147,6 +147,13 @@ function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void
           </button>
         </div>
 
+        {email.email && (
+          <div style={{ background: DS.accentLight, borderRadius: 8, padding: '8px 13px', marginBottom: 10 }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>To</p>
+            <p style={{ fontSize: 12.5, color: DS.primary, fontWeight: 500 }}>{email.email}</p>
+          </div>
+        )}
+
         <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 10 }}>
           <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject</p>
           <p style={{ fontSize: 13, color: DS.bodyText, fontWeight: 500 }}>{email.subject}</p>
@@ -158,17 +165,17 @@ function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void
         </div>
 
         <button
-          onClick={copy}
+          onClick={openMailto}
           style={{
             display: 'flex', alignItems: 'center', gap: 7,
             width: '100%', padding: '9px 16px', borderRadius: 8,
-            background: copied ? DS.primary : DS.bodyText,
-            border: 'none', color: 'white', fontSize: 13, fontWeight: 600,
-            cursor: 'pointer', justifyContent: 'center', fontFamily: 'inherit',
-            transition: 'background 0.2s', minHeight: 40,
+            background: DS.primary, border: 'none', color: 'white',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            justifyContent: 'center', fontFamily: 'inherit',
+            boxShadow: `0 2px 8px rgba(29,158,117,0.25)`, minHeight: 40,
           }}
         >
-          {copied ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy to Clipboard</>}
+          <Mail size={13} /> Open in Email Client
         </button>
       </div>
     </div>
@@ -214,7 +221,7 @@ function ProspectDetail({
       body: JSON.stringify({ prospect, business }),
     })
     const data = await res.json()
-    if (data.subject) setDraftEmail(data)
+    if (data.subject) setDraftEmail({ ...data, email: prospect.email || prospect.email_format || '' })
     setDraftLoading(false)
   }
 
@@ -462,6 +469,7 @@ function AISearchTab({
   const [searching,     setSearching]     = useState(false)
   const [totalExpected, setTotalExpected] = useState(10)
   const [results,       setResults]       = useState<BatchResult[]>([])
+  const [isRecentResults, setIsRecentResults] = useState(false)
   const [searchErr,     setSearchErr]     = useState('')
   const [cachedSearch,  setCachedSearch]  = useState<ProspectSearch | null>(null)
   const [selectedIdx,   setSelectedIdx]   = useState<Set<number>>(new Set())
@@ -469,12 +477,12 @@ function AISearchTab({
   const [duplicateIdx,  setDuplicateIdx]  = useState<Set<number>>(new Set())
   const [inPipelineIdx, setInPipelineIdx] = useState<Set<number>>(new Set())
   const [addingIdx,     setAddingIdx]     = useState<Set<number>>(new Set())
-  const [savingAll,       setSavingAll]       = useState(false)
-  const [savingProspects, setSavingProspects] = useState(false)
-  const [addedConfirm,    setAddedConfirm]    = useState(false)
-  const [emailModal,      setEmailModal]      = useState<DraftEmail | null>(null)
+  const [savingAll,     setSavingAll]     = useState(false)
+  const [addedConfirm,  setAddedConfirm]  = useState(false)
+  const [emailModal,    setEmailModal]    = useState<DraftEmail | null>(null)
 
-  const pollRef           = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
+  const savedCountRef = useRef(0)
   const pills             = quickSearches(business)
   const existingCompanies = prospects.map(p => p.company_name)
   const sl: React.CSSProperties = { fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 4 }
@@ -482,45 +490,67 @@ function AISearchTab({
   // Clear poll interval on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
+  // BUG 1: load recent search results from the prospects prop on mount
+  useEffect(() => {
+    if (results.length > 0 || searching) return
+    const recent = prospects
+      .filter(p => p.source === 'ai_search_batch' || p.source === 'ai_search')
+      .slice(0, 10)
+    if (recent.length === 0) return
+    const batchResults: BatchResult[] = recent.map(p => ({
+      company_name: p.company_name, website: p.website ?? '',
+      location: p.location ?? '', overview: p.company_overview ?? '',
+      contact_name: p.contact_name ?? '', contact_title: p.contact_title ?? '',
+      email_format: p.email_format ?? '', pain_points: p.pain_points ?? '',
+      pitch_angle: p.pitch_angle ?? '', email_subject: '', email_body: '',
+    }))
+    setResults(batchResults)
+    setIsRecentResults(true)
+    const sm = new Map<number, Prospect>()
+    const pi = new Set<number>()
+    recent.forEach((p, i) => { sm.set(i, p); if (p.status === 'pipeline') pi.add(i) })
+    setSavedMap(sm); setInPipelineIdx(pi)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const stopPolling = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
   }
 
-  const saveResults = async (batchResults: BatchResult[], searchText: string) => {
-    const saves = await Promise.all(
-      batchResults.map((r, i) =>
-        saveProspectFromSearch({
-          business_id: business.id, company_name: r.company_name, contact_name: r.contact_name,
-          contact_title: r.contact_title, email: r.email_format, website: r.website,
-          location: r.location, company_overview: r.overview, email_format: r.email_format,
-          pain_points: r.pain_points, pitch_angle: r.pitch_angle, talking_points: '[]',
-          search_query: searchText, source: 'ai_search_batch',
-        }).then(saved => ({ i, saved }))
-      )
-    )
-    const sm: Map<number, Prospect> = new Map()
-    const di: Set<number>           = new Set()
-    const pi: Set<number>           = new Set()
-    const newProspects: Prospect[]  = []
-    saves.forEach(({ i, saved }) => {
-      if (saved.prospect) {
-        sm.set(i, saved.prospect)
-        if (saved.duplicate) di.add(i)
-        if (saved.prospect.status === 'pipeline') pi.add(i)
-        if (!saved.duplicate) newProspects.push(saved.prospect)
-      }
+  // BUG 1: save a single result to Supabase immediately and update local state
+  const saveOneResult = async (r: BatchResult, i: number, searchText: string) => {
+    const saved = await saveProspectFromSearch({
+      business_id:     business.id,
+      company_name:    r.company_name,
+      contact_name:    r.contact_name,
+      contact_title:   r.contact_title,
+      email:           r.email_format,
+      website:         r.website,
+      location:        r.location,
+      company_overview: r.overview,
+      email_format:    r.email_format,
+      pain_points:     r.pain_points,
+      pitch_angle:     r.pitch_angle,
+      talking_points:  '[]',
+      search_query:    searchText,
+      source:          'ai_search_batch',
     })
-    setSavedMap(sm); setDuplicateIdx(di); setInPipelineIdx(pi)
-    if (newProspects.length) onProspectsAdded(newProspects)
-    await saveSearch(business.id, searchText, batchResults.length)
+    if (saved.prospect) {
+      setSavedMap(prev => new Map(prev).set(i, saved.prospect!))
+      if (saved.duplicate)                        setDuplicateIdx(prev => new Set([...prev, i]))
+      if (saved.prospect.status === 'pipeline')   setInPipelineIdx(prev => new Set([...prev, i]))
+      if (!saved.duplicate) onProspectsAdded([saved.prospect])
+    }
+    return saved
   }
 
   const runSearch = async (q: string, force = false) => {
     const text = q.trim()
     if (!text || searching) return
     stopPolling()
+    savedCountRef.current = 0
     setQuery(text); setSearching(true); setResults([]); setSearchErr(''); setCachedSearch(null)
-    setTotalExpected(10); setSavingProspects(false); setAddedConfirm(false)
+    setIsRecentResults(false); setTotalExpected(10); setAddedConfirm(false)
     setSelectedIdx(new Set()); setSavedMap(new Map()); setDuplicateIdx(new Set()); setInPipelineIdx(new Set())
 
     // Cache path — still instant
@@ -560,14 +590,24 @@ function AISearchTab({
       if (!runId) { setSearchErr('Search failed to start.'); setSearching(false); return }
       setTotalExpected(total ?? 10)
 
-      // Poll every 2 seconds for completed tasks
+      // Poll every 2 seconds; save each new completed result immediately (BUG 1)
       pollRef.current = setInterval(async () => {
         try {
           const poll = await fetch(`/api/research/batch?runId=${runId}`)
           const data = await poll.json()
 
-          if (data.results?.length) setResults(data.results)
-          if (data.total)           setTotalExpected(data.total)
+          const allResults: BatchResult[] = data.results ?? []
+          if (allResults.length) setResults(allResults)
+          if (data.total)        setTotalExpected(data.total)
+
+          // Save any newly completed results immediately to Supabase
+          const prevCount = savedCountRef.current
+          if (allResults.length > prevCount) {
+            savedCountRef.current = allResults.length
+            allResults.slice(prevCount).forEach((r, offset) => {
+              saveOneResult(r, prevCount + offset, text)
+            })
+          }
 
           const isDone = data.status === 'done' || data.status === 'failed' ||
             (data.completed + data.failed) >= (data.total ?? 10)
@@ -575,12 +615,11 @@ function AISearchTab({
           if (isDone) {
             stopPolling()
             setSearching(false)
-            if (!data.results?.length) {
+            savedCountRef.current = 0
+            if (!allResults.length) {
               setSearchErr('No results found. Try a more specific search.')
             } else {
-              // Save to Supabase in background — keep buttons disabled until done
-              setSavingProspects(true)
-              saveResults(data.results, text).finally(() => setSavingProspects(false))
+              await saveSearch(business.id, text, allResults.length)
             }
           }
         } catch {
@@ -599,27 +638,66 @@ function AISearchTab({
   }
 
   const addOneToPipeline = async (i: number) => {
-    const p = savedMap.get(i)
-    if (!p || addingIdx.has(i) || inPipelineIdx.has(i)) return
+    if (addingIdx.has(i) || inPipelineIdx.has(i)) return
     setAddingIdx(prev => new Set([...prev, i]))
-    const { success } = await moveToLeadsPipeline(p.id, business.id)
-    if (success) setInPipelineIdx(prev => new Set([...prev, i]))
+    await addCardsToPipeline([i])
     setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
   }
 
-  const addAllToPipeline = async (indices?: Set<number>) => {
+  // BUG 2: save prospect (handles dedup) + add to leads pipeline in one step
+  const addCardsToPipeline = async (indices: number[]) => {
+    const toProcess = indices.filter(i => !inPipelineIdx.has(i))
+    if (!toProcess.length) return
     setSavingAll(true)
-    const toSave = indices
-      ? Array.from(indices).filter(i => !inPipelineIdx.has(i) && savedMap.has(i))
-      : Array.from(savedMap.keys()).filter(i => !inPipelineIdx.has(i) && !duplicateIdx.has(i))
-    await Promise.all(toSave.map(i => { const p = savedMap.get(i)!; return moveToLeadsPipeline(p.id, business.id) }))
-    setInPipelineIdx(prev => new Set([...prev, ...toSave]))
+
+    for (const i of toProcess) {
+      const r = results[i]
+      if (!r) { console.warn('[Pipeline] No result at index', i); continue }
+
+      console.log('[Pipeline] Processing:', r.company_name, '(index', i, ')')
+
+      // Step 1: ensure prospect is in Supabase
+      let prospectId = savedMap.get(i)?.id
+      if (!prospectId) {
+        console.log('[Pipeline] Saving prospect to Supabase:', r.company_name)
+        const saved = await saveProspectFromSearch({
+          business_id: business.id, company_name: r.company_name,
+          contact_name: r.contact_name, contact_title: r.contact_title,
+          email: r.email_format, website: r.website, location: r.location,
+          company_overview: r.overview, email_format: r.email_format,
+          pain_points: r.pain_points, pitch_angle: r.pitch_angle,
+          talking_points: '[]', search_query: query, source: 'ai_search_batch',
+        })
+        console.log('[Pipeline] saveProspectFromSearch result:', saved)
+        if (!saved.prospect) { console.error('[Pipeline] Failed to save prospect:', saved.error); continue }
+        prospectId = saved.prospect.id
+        setSavedMap(prev => new Map(prev).set(i, saved.prospect!))
+      }
+
+      // Step 2: move to leads pipeline
+      console.log('[Pipeline] Moving prospect', prospectId, 'to leads pipeline')
+      const result = await moveToLeadsPipeline(prospectId, business.id)
+      console.log('[Pipeline] moveToLeadsPipeline result:', result)
+
+      if (result.success) {
+        setInPipelineIdx(prev => new Set([...prev, i]))
+        setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
+      } else {
+        console.error('[Pipeline] Failed to move to pipeline:', result.error)
+      }
+    }
+
     setSelectedIdx(new Set())
     setSavingAll(false)
-    if (toSave.length > 0) {
-      setAddedConfirm(true)
-      setTimeout(() => setAddedConfirm(false), 2500)
-    }
+    setAddedConfirm(true)
+    setTimeout(() => setAddedConfirm(false), 2500)
+  }
+
+  const addAllToPipeline = (indices?: Set<number>) => {
+    const toAdd = indices
+      ? Array.from(indices)
+      : Array.from({ length: results.length }, (_, i) => i).filter(i => !duplicateIdx.has(i))
+    return addCardsToPipeline(toAdd)
   }
 
   const nonDuplicateCount = results.filter((_, i) => !duplicateIdx.has(i)).length
@@ -733,21 +811,15 @@ function AISearchTab({
             )}
           </div>
           <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
-            {savingProspects && (
-              <span style={{ fontSize: 11, color: DS.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Saving…
-              </span>
-            )}
             {selectedIdx.size > 0 && (
               <button
                 onClick={() => addAllToPipeline(selectedIdx)}
-                disabled={savingAll || savingProspects}
+                disabled={savingAll}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7,
                   border: `1.5px solid ${DS.primary}`, background: DS.cardBg,
                   color: DS.primary, fontSize: 12, fontWeight: 600,
-                  cursor: savingAll || savingProspects ? 'not-allowed' : 'pointer',
-                  fontFamily: 'inherit', opacity: savingProspects ? 0.5 : 1,
+                  cursor: savingAll ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
                 }}
               >
                 {savingAll ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={12} />}
@@ -756,16 +828,16 @@ function AISearchTab({
             )}
             <button
               onClick={() => addAllToPipeline()}
-              disabled={savingAll || savingProspects || inPipelineCount >= nonDuplicateCount}
+              disabled={savingAll || inPipelineCount >= nonDuplicateCount}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7, border: 'none',
                 background: addedConfirm ? '#059669'
-                  : savingAll || savingProspects || inPipelineCount >= nonDuplicateCount ? '#E4E4E7'
+                  : savingAll || inPipelineCount >= nonDuplicateCount ? '#E4E4E7'
                   : DS.primary,
                 color: 'white', fontSize: 12, fontWeight: 600,
-                cursor: savingAll || savingProspects || inPipelineCount >= nonDuplicateCount ? 'not-allowed' : 'pointer',
+                cursor: savingAll || inPipelineCount >= nonDuplicateCount ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit',
-                boxShadow: savingAll || savingProspects || inPipelineCount >= nonDuplicateCount ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
+                boxShadow: savingAll || inPipelineCount >= nonDuplicateCount ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
                 transition: 'background 0.2s',
               }}
             >
@@ -779,6 +851,21 @@ function AISearchTab({
               }
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Recent results banner */}
+      {isRecentResults && results.length > 0 && !searching && (
+        <div style={{ background: DS.accentMid, border: `1px solid ${DS.cardBorder}`, borderRadius: 8, padding: '8px 13px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <p style={{ fontSize: 12, color: DS.secondary, fontWeight: 500 }}>
+            Showing your last {results.length} prospect results
+          </p>
+          <button
+            onClick={() => { setResults([]); setIsRecentResults(false); setSavedMap(new Map()); setInPipelineIdx(new Set()) }}
+            style={{ fontSize: 11.5, color: DS.muted, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}
+          >
+            Clear
+          </button>
         </div>
       )}
 
@@ -891,7 +978,7 @@ function AISearchTab({
                   <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                     {r.email_subject && r.email_body && (
                       <button
-                        onClick={() => setEmailModal({ subject: r.email_subject, body: r.email_body })}
+                        onClick={() => setEmailModal({ subject: r.email_subject, body: r.email_body, email: r.email_format || '' })}
                         style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1.5px solid ${DS.outlineBorder}`, background: DS.cardBg, color: DS.outlineText, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                       >
                         <Mail size={10} /> Draft Email
@@ -1167,7 +1254,7 @@ function PipelineTab({
       body: JSON.stringify({ prospect: p, business }),
     })
     const data = await res.json()
-    if (data.subject) setDraftEmail(data)
+    if (data.subject) setDraftEmail({ ...data, email: p.email || p.email_format || '' })
     setDraftLoading(false)
   }
 
