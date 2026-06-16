@@ -119,13 +119,18 @@ function getInitials(name: string): string {
 
 // ── Draft Email Modal ─────────────────────────────────────────────────────────
 
-function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void }) {
+function EmailModal({ email, onClose, onOpen }: {
+  email:    DraftEmail
+  onClose:  () => void
+  onOpen?:  () => void   // fires after Gmail window opens (PATH 1: auto-create pipeline lead)
+}) {
   const openMailto = () => {
     const to      = encodeURIComponent(email.email ?? '')
     const subject = encodeURIComponent(email.subject)
     const body    = encodeURIComponent(email.body)
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${body}`
     window.open(gmailUrl, '_blank')
+    onOpen?.()   // fire-and-forget; caller owns the async work
     onClose()
   }
 
@@ -484,10 +489,12 @@ function AISearchTab({
   const [duplicateIdx,  setDuplicateIdx]  = useState<Set<number>>(new Set())
   const [inPipelineIdx, setInPipelineIdx] = useState<Set<number>>(new Set())
   const [addingIdx,     setAddingIdx]     = useState<Set<number>>(new Set())
-  const [savingAll,     setSavingAll]     = useState(false)
-  const [addedConfirm,  setAddedConfirm]  = useState(false)
-  const [errorToast,    setErrorToast]    = useState<string | null>(null)
-  const [emailModal,    setEmailModal]    = useState<DraftEmail | null>(null)
+  const [savingAll,       setSavingAll]       = useState(false)
+  const [addedConfirm,    setAddedConfirm]    = useState(false)
+  const [errorToast,      setErrorToast]      = useState<string | null>(null)
+  const [pipelineConfirm, setPipelineConfirm] = useState<string | null>(null)
+  const [emailModal,      setEmailModal]      = useState<DraftEmail | null>(null)
+  const [draftCardIdx,    setDraftCardIdx]    = useState<number | null>(null)
 
   const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
   const savedCountRef = useRef(0)
@@ -789,6 +796,17 @@ function AISearchTab({
         </div>
       )}
 
+      {/* Pipeline confirm banner (PATH 1: email → pipeline) */}
+      {pipelineConfirm && (
+        <div style={{
+          background: 'rgba(29,158,117,0.08)', border: '1px solid rgba(29,158,117,0.25)',
+          borderRadius: 9, padding: '10px 14px', marginBottom: 14,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ {pipelineConfirm}</span>
+        </div>
+      )}
+
       {/* Search bar */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <div style={{
@@ -1052,7 +1070,7 @@ function AISearchTab({
                   <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                     {r.email_subject && r.email_body && (
                       <button
-                        onClick={() => setEmailModal({ subject: r.email_subject, body: r.email_body, email: r.email_format || '' })}
+                        onClick={() => { setDraftCardIdx(i); setEmailModal({ subject: r.email_subject, body: r.email_body, email: r.email_format || '' }) }}
                         style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1.5px solid ${DS.outlineBorder}`, background: DS.cardBg, color: DS.outlineText, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                       >
                         <Mail size={10} /> Draft Email
@@ -1090,7 +1108,49 @@ function AISearchTab({
         </div>
       )}
 
-      {emailModal && <EmailModal email={emailModal} onClose={() => setEmailModal(null)} />}
+      {emailModal && (
+        <EmailModal
+          email={emailModal}
+          onClose={() => { setEmailModal(null); setDraftCardIdx(null) }}
+          onOpen={() => {
+            if (draftCardIdx === null) return
+            const r = results[draftCardIdx]
+            const idx = draftCardIdx
+            ;(async () => {
+              let prospectId = savedMap.get(idx)?.id
+              if (!prospectId) {
+                const saved = await saveProspectFromSearch({
+                  business_id:      business.id,
+                  company_name:     r.company_name,
+                  contact_name:     r.contact_name,
+                  contact_title:    r.contact_title,
+                  email:            r.email_format,
+                  website:          r.website,
+                  location:         r.location,
+                  company_overview: r.overview,
+                  email_format:     r.email_format,
+                  pain_points:      r.pain_points,
+                  pitch_angle:      r.pitch_angle,
+                  talking_points:   '[]',
+                  search_query:     query,
+                  source:           'ai_search_batch',
+                })
+                if (saved.prospect) {
+                  prospectId = saved.prospect.id
+                  setSavedMap(prev => new Map(prev).set(idx, saved.prospect!))
+                }
+              }
+              if (!prospectId) return
+              const result = await moveToLeadsPipeline(prospectId, business.id)
+              if (result.success) {
+                setInPipelineIdx(prev => new Set([...prev, idx]))
+                setPipelineConfirm('Lead added to pipeline as Contacted')
+                setTimeout(() => setPipelineConfirm(null), 3500)
+              }
+            })()
+          }}
+        />
+      )}
     </div>
   )
 }

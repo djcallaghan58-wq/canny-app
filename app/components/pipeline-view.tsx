@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, ChevronLeft, ChevronRight, Bot, X, Bell } from 'lucide-react'
-import type { Business, Lead, LeadStage } from '@/lib/supabase'
+import { Plus, ChevronLeft, ChevronRight, Bot, X, Bell, Mail, Loader2 } from 'lucide-react'
+import type { Business, Lead, LeadStage, Prospect } from '@/lib/supabase'
 import { updateLeadStage, createLead } from '@/app/actions/leads'
+import { getProspectById } from '@/app/actions/prospects'
 import { FollowupsTab } from '@/app/components/followups-tab'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -59,14 +60,75 @@ function isStale(lead: Lead): boolean {
   return daysSince(ref) >= 3
 }
 
+// ── Email modal (for prospect-linked leads) ───────────────────────────────────
+
+function PipelineEmailModal({ subject, body, email, onClose }: {
+  subject: string; body: string; email: string; onClose: () => void
+}) {
+  const open = () => {
+    const to  = encodeURIComponent(email)
+    const su  = encodeURIComponent(subject)
+    const bd  = encodeURIComponent(body)
+    window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${bd}`, '_blank')
+    onClose()
+  }
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.4)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 16 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: DS.cardBg, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.12)', border: `1px solid ${DS.cardBorder}`, maxHeight: '85vh', overflowY: 'auto' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Mail size={15} color={DS.secondary} />
+            <span style={{ fontSize: 15, fontWeight: 700, color: DS.bodyText }}>Draft Outreach Email</span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.muted, padding: 4 }}><X size={15} /></button>
+        </div>
+        {email && (
+          <div style={{ background: DS.accentLight, borderRadius: 8, padding: '8px 13px', marginBottom: 10 }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>To</p>
+            <p style={{ fontSize: 12.5, color: DS.primary, fontWeight: 500 }}>{email}</p>
+          </div>
+        )}
+        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 10 }}>
+          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject</p>
+          <p style={{ fontSize: 13, color: DS.bodyText, fontWeight: 500 }}>{subject}</p>
+        </div>
+        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 18 }}>
+          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 7 }}>Body</p>
+          <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{body}</p>
+        </div>
+        <button
+          onClick={open}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: '100%',
+            padding: '9px 16px', borderRadius: 8, background: DS.primary,
+            border: 'none', color: 'white', fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', justifyContent: 'center', fontFamily: 'inherit',
+            boxShadow: '0 2px 8px rgba(29,158,117,0.25)', minHeight: 40,
+          }}
+        >
+          <Mail size={13} /> Open in Gmail
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Lead card (kanban) ────────────────────────────────────────────────────────
 
 function LeadCard({
-  lead, onMove, onCoach,
+  lead, onMove, onCoach, onDraftEmail, draftLoading,
 }: {
   lead: Lead
   onMove: (id: string, dir: 'back' | 'forward') => void
   onCoach: (lead: Lead) => void
+  onDraftEmail?: (lead: Lead) => void
+  draftLoading?: boolean
 }) {
   const [hovered, setHovered] = useState(false)
   const stale    = isStale(lead)
@@ -163,6 +225,27 @@ function LeadCard({
             >
               <ChevronRight size={12} />
             </button>
+            {lead.prospect_id && (
+              <button
+                onClick={() => onDraftEmail?.(lead)}
+                disabled={draftLoading}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  padding: '3px 9px', borderRadius: 5, minHeight: 24,
+                  border: `1px solid ${DS.cardBorder}`,
+                  background: DS.inputBg, color: DS.secondary,
+                  fontSize: 10.5, fontWeight: 600,
+                  cursor: draftLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                  transition: 'all 0.15s', flexShrink: 0,
+                }}
+              >
+                {draftLoading
+                  ? <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <Mail size={9} />
+                }
+                Draft Email
+              </button>
+            )}
             <button
               onClick={() => onCoach(lead)}
               style={{
@@ -357,8 +440,34 @@ export function PipelineView({
   initialLeads: Lead[]
 }) {
   const router = useRouter()
-  const [leads,   setLeads]   = useState<Lead[]>(initialLeads)
-  const [showAdd, setShowAdd] = useState(false)
+  const [leads,          setLeads]          = useState<Lead[]>(initialLeads)
+  const [showAdd,        setShowAdd]        = useState(false)
+  const [draftEmailData, setDraftEmailData] = useState<{ subject: string; body: string; email: string } | null>(null)
+  const [draftLoadingId, setDraftLoadingId] = useState<string | null>(null)
+
+  const handleDraftEmail = async (lead: Lead) => {
+    if (!lead.prospect_id || draftLoadingId) return
+    setDraftLoadingId(lead.id)
+    try {
+      const prospect = await getProspectById(lead.prospect_id)
+      if (!prospect) return
+      const res = await fetch('/api/prospect/draft-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect, business }),
+      })
+      const data = await res.json()
+      if (data.subject) {
+        setDraftEmailData({
+          subject: data.subject,
+          body:    data.body,
+          email:   prospect.email || prospect.email_format || '',
+        })
+      }
+    } finally {
+      setDraftLoadingId(null)
+    }
+  }
 
   const handleMove = async (leadId: string, dir: 'back' | 'forward') => {
     const lead = leads.find(l => l.id === leadId)
@@ -494,6 +603,7 @@ export function PipelineView({
         scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`,
         background: DS.pageBg,
       }}>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
         {STAGES.map(stage => {
           const stageLeads = leads.filter(l => l.stage === stage)
           const stageColor = STAGE_COLORS[stage] ?? DS.primary
@@ -552,6 +662,8 @@ export function PipelineView({
                       lead={lead}
                       onMove={handleMove}
                       onCoach={handleCoach}
+                      onDraftEmail={handleDraftEmail}
+                      draftLoading={draftLoadingId === lead.id}
                     />
                   ))
                 ) : (
@@ -574,6 +686,15 @@ export function PipelineView({
           business={business}
           onClose={() => setShowAdd(false)}
           onAdd={lead => setLeads(prev => [lead, ...prev])}
+        />
+      )}
+
+      {draftEmailData && (
+        <PipelineEmailModal
+          subject={draftEmailData.subject}
+          body={draftEmailData.body}
+          email={draftEmailData.email}
+          onClose={() => setDraftEmailData(null)}
         />
       )}
     </>
