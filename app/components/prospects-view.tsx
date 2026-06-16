@@ -120,11 +120,11 @@ function getInitials(name: string): string {
 
 function EmailModal({ email, onClose }: { email: DraftEmail; onClose: () => void }) {
   const openMailto = () => {
-    const to      = email.email ?? ''
+    const to      = encodeURIComponent(email.email ?? '')
     const subject = encodeURIComponent(email.subject)
     const body    = encodeURIComponent(email.body)
-    const mailto  = `mailto:${to}?subject=${subject}&body=${body}`
-    window.open(mailto, '_blank')
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${body}`
+    window.open(gmailUrl, '_blank')
     onClose()
   }
 
