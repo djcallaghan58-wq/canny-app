@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Search, Upload, GitBranch, X, ChevronLeft, ChevronRight,
@@ -459,6 +459,7 @@ function AISearchTab({
 }) {
   const [query,         setQuery]         = useState('')
   const [searching,     setSearching]     = useState(false)
+  const [totalExpected, setTotalExpected] = useState(10)
   const [results,       setResults]       = useState<BatchResult[]>([])
   const [searchErr,     setSearchErr]     = useState('')
   const [cachedSearch,  setCachedSearch]  = useState<ProspectSearch | null>(null)
@@ -470,16 +471,56 @@ function AISearchTab({
   const [savingAll,     setSavingAll]     = useState(false)
   const [emailModal,    setEmailModal]    = useState<DraftEmail | null>(null)
 
-  const pills              = quickSearches(business)
-  const existingCompanies  = prospects.map(p => p.company_name)
+  const pollRef           = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pills             = quickSearches(business)
+  const existingCompanies = prospects.map(p => p.company_name)
   const sl: React.CSSProperties = { fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 4 }
+
+  // Clear poll interval on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
+  const saveResults = async (batchResults: BatchResult[], searchText: string) => {
+    const saves = await Promise.all(
+      batchResults.map((r, i) =>
+        saveProspectFromSearch({
+          business_id: business.id, company_name: r.company_name, contact_name: r.contact_name,
+          contact_title: r.contact_title, email: r.email_format, website: r.website,
+          location: r.location, company_overview: r.overview, email_format: r.email_format,
+          pain_points: r.pain_points, pitch_angle: r.pitch_angle, talking_points: '[]',
+          search_query: searchText, source: 'ai_search_batch',
+        }).then(saved => ({ i, saved }))
+      )
+    )
+    const sm: Map<number, Prospect> = new Map()
+    const di: Set<number>           = new Set()
+    const pi: Set<number>           = new Set()
+    const newProspects: Prospect[]  = []
+    saves.forEach(({ i, saved }) => {
+      if (saved.prospect) {
+        sm.set(i, saved.prospect)
+        if (saved.duplicate) di.add(i)
+        if (saved.prospect.status === 'pipeline') pi.add(i)
+        if (!saved.duplicate) newProspects.push(saved.prospect)
+      }
+    })
+    setSavedMap(sm); setDuplicateIdx(di); setInPipelineIdx(pi)
+    if (newProspects.length) onProspectsAdded(newProspects)
+    await saveSearch(business.id, searchText, batchResults.length)
+  }
 
   const runSearch = async (q: string, force = false) => {
     const text = q.trim()
     if (!text || searching) return
+    stopPolling()
     setQuery(text); setSearching(true); setResults([]); setSearchErr(''); setCachedSearch(null)
+    setTotalExpected(10)
     setSelectedIdx(new Set()); setSavedMap(new Map()); setDuplicateIdx(new Set()); setInPipelineIdx(new Set())
 
+    // Cache path — still instant
     if (!force) {
       const cached = await checkRecentSearch(business.id, text)
       if (cached.found && cached.search && cached.prospects && cached.prospects.length >= 3) {
@@ -500,51 +541,47 @@ function AISearchTab({
       }
     }
 
+    // Live search — kick off background run, then poll
     try {
       const res = await fetch('/api/research/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: text,
+          businessId: business.id,
           business: { name: business.name, industry: business.industry, ideal_customer: business.ideal_customer, main_service: business.main_service, city: business.city },
           existingCompanies,
         }),
       })
-      const data = await res.json()
-      if (!data.results?.length) { setSearchErr(data.error || 'No results found. Try a more specific search.'); setSearching(false); return }
+      const { runId, total } = await res.json()
+      if (!runId) { setSearchErr('Search failed to start.'); setSearching(false); return }
+      setTotalExpected(total ?? 10)
 
-      const batchResults: BatchResult[] = data.results
-      setResults(batchResults); setSearching(false)
+      // Poll every 2 seconds for completed tasks
+      pollRef.current = setInterval(async () => {
+        try {
+          const poll = await fetch(`/api/research/batch?runId=${runId}`)
+          const data = await poll.json()
 
-      const saves = await Promise.all(
-        batchResults.map((r, i) =>
-          saveProspectFromSearch({
-            business_id: business.id, company_name: r.company_name, contact_name: r.contact_name,
-            contact_title: r.contact_title, email: r.email_format, website: r.website,
-            location: r.location, company_overview: r.overview, email_format: r.email_format,
-            pain_points: r.pain_points, pitch_angle: r.pitch_angle, talking_points: '[]',
-            search_query: text, source: 'ai_search_batch',
-          }).then(saved => ({ i, saved }))
-        )
-      )
+          if (data.results?.length) setResults(data.results)
+          if (data.total)           setTotalExpected(data.total)
 
-      const sm = new Map<number, Prospect>()
-      const di = new Set<number>()
-      const pi = new Set<number>()
-      const newProspects: Prospect[] = []
+          const isDone = data.status === 'done' || data.status === 'failed' ||
+            (data.completed + data.failed) >= (data.total ?? 10)
 
-      saves.forEach(({ i, saved }) => {
-        if (saved.prospect) {
-          sm.set(i, saved.prospect)
-          if (saved.duplicate) di.add(i)
-          if (saved.prospect.status === 'pipeline') pi.add(i)
-          if (!saved.duplicate) newProspects.push(saved.prospect)
+          if (isDone) {
+            stopPolling()
+            setSearching(false)
+            if (!data.results?.length) {
+              setSearchErr('No results found. Try a more specific search.')
+            } else {
+              await saveResults(data.results, text)
+            }
+          }
+        } catch {
+          // transient poll error — keep trying
         }
-      })
-
-      setSavedMap(sm); setDuplicateIdx(di); setInPipelineIdx(pi)
-      if (newProspects.length) onProspectsAdded(newProspects)
-      await saveSearch(business.id, text, batchResults.length)
+      }, 2000)
     } catch {
       setSearchErr('Search failed. Check your connection and try again.')
       setSearching(false)
@@ -714,15 +751,15 @@ function AISearchTab({
         </div>
       )}
 
-      {/* Skeleton grid */}
-      {searching && (
+      {/* Live grid: real cards first, skeletons fill remaining slots during search */}
+      {(searching && results.length === 0) && (
         <div className="batch-grid">
-          {Array.from({ length: 10 }).map((_, i) => <SkeletonCard key={i} />)}
+          {Array.from({ length: totalExpected }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       )}
 
-      {/* Results grid */}
-      {results.length > 0 && !searching && (
+      {/* Results grid (also shown mid-search with trailing skeletons) */}
+      {results.length > 0 && (
         <div className="batch-grid">
           {results.map((r, i) => {
             const isDupe    = duplicateIdx.has(i)
@@ -854,6 +891,10 @@ function AISearchTab({
               </div>
             )
           })}
+          {/* Trailing skeletons while more results are coming in */}
+          {searching && Array.from({ length: Math.max(0, totalExpected - results.length) }).map((_, i) => (
+            <SkeletonCard key={`sk-${i}`} />
+          ))}
         </div>
       )}
 

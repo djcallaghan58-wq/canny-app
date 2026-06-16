@@ -2,6 +2,9 @@
   "functions": {
     "app/api/**": {
       "maxDuration": 60
+    },
+    "app/api/research/batch/route": {
+      "maxDuration": 300
     }
   }
 }
