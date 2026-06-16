@@ -1250,7 +1250,7 @@ export function ProspectsView({
     setProspects(prev => prev.map(p => p.id === id ? { ...p, stage } : p))
 
   const TABS: { id: Tab; label: string; icon: typeof Search }[] = [
-    { id: 'search',   label: 'AI Search', icon: Search    },
+    { id: 'search',   label: 'Prospecting', icon: Search    },
     { id: 'lists',    label: 'My Lists',  icon: Upload    },
     { id: 'pipeline', label: 'Pipeline',  icon: GitBranch },
   ]

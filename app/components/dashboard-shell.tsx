@@ -33,7 +33,7 @@ type NavEntry = { href: string; label: string; icon: React.ElementType }
 
 const NAV_MAIN: NavEntry[] = [
   { href: '/dashboard',           label: 'Dashboard',     icon: LayoutDashboard },
-  { href: '/dashboard/prospects', label: 'AI Search',     icon: Search    },
+  { href: '/dashboard/prospects', label: 'Prospecting',   icon: Search    },
   { href: '/dashboard/pipeline',  label: 'Pipeline',      icon: GitBranch },
   { href: '/dashboard/prospects', label: 'My Lists',      icon: List      },
 ]
