@@ -468,8 +468,10 @@ function AISearchTab({
   const [duplicateIdx,  setDuplicateIdx]  = useState<Set<number>>(new Set())
   const [inPipelineIdx, setInPipelineIdx] = useState<Set<number>>(new Set())
   const [addingIdx,     setAddingIdx]     = useState<Set<number>>(new Set())
-  const [savingAll,     setSavingAll]     = useState(false)
-  const [emailModal,    setEmailModal]    = useState<DraftEmail | null>(null)
+  const [savingAll,       setSavingAll]       = useState(false)
+  const [savingProspects, setSavingProspects] = useState(false)
+  const [addedConfirm,    setAddedConfirm]    = useState(false)
+  const [emailModal,      setEmailModal]      = useState<DraftEmail | null>(null)
 
   const pollRef           = useRef<ReturnType<typeof setInterval> | null>(null)
   const pills             = quickSearches(business)
@@ -517,7 +519,7 @@ function AISearchTab({
     if (!text || searching) return
     stopPolling()
     setQuery(text); setSearching(true); setResults([]); setSearchErr(''); setCachedSearch(null)
-    setTotalExpected(10)
+    setTotalExpected(10); setSavingProspects(false); setAddedConfirm(false)
     setSelectedIdx(new Set()); setSavedMap(new Map()); setDuplicateIdx(new Set()); setInPipelineIdx(new Set())
 
     // Cache path — still instant
@@ -575,7 +577,9 @@ function AISearchTab({
             if (!data.results?.length) {
               setSearchErr('No results found. Try a more specific search.')
             } else {
-              await saveResults(data.results, text)
+              // Save to Supabase in background — keep buttons disabled until done
+              setSavingProspects(true)
+              saveResults(data.results, text).finally(() => setSavingProspects(false))
             }
           }
         } catch {
@@ -609,7 +613,12 @@ function AISearchTab({
       : Array.from(savedMap.keys()).filter(i => !inPipelineIdx.has(i) && !duplicateIdx.has(i))
     await Promise.all(toSave.map(i => { const p = savedMap.get(i)!; return moveToLeadsPipeline(p.id, business.id) }))
     setInPipelineIdx(prev => new Set([...prev, ...toSave]))
+    setSelectedIdx(new Set())
     setSavingAll(false)
+    if (toSave.length > 0) {
+      setAddedConfirm(true)
+      setTimeout(() => setAddedConfirm(false), 2500)
+    }
   }
 
   const nonDuplicateCount = results.filter((_, i) => !duplicateIdx.has(i)).length
@@ -722,30 +731,51 @@ function AISearchTab({
               </span>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 7 }}>
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+            {savingProspects && (
+              <span style={{ fontSize: 11, color: DS.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Saving…
+              </span>
+            )}
             {selectedIdx.size > 0 && (
               <button
                 onClick={() => addAllToPipeline(selectedIdx)}
-                disabled={savingAll}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7, border: `1.5px solid ${DS.primary}`, background: DS.cardBg, color: DS.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                disabled={savingAll || savingProspects}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7,
+                  border: `1.5px solid ${DS.primary}`, background: DS.cardBg,
+                  color: DS.primary, fontSize: 12, fontWeight: 600,
+                  cursor: savingAll || savingProspects ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit', opacity: savingProspects ? 0.5 : 1,
+                }}
               >
-                <Plus size={12} /> Add Selected ({selectedIdx.size})
+                {savingAll ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={12} />}
+                {savingAll ? 'Adding…' : `Add Selected (${selectedIdx.size})`}
               </button>
             )}
             <button
               onClick={() => addAllToPipeline()}
-              disabled={savingAll || inPipelineCount >= nonDuplicateCount}
+              disabled={savingAll || savingProspects || inPipelineCount >= nonDuplicateCount}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 7, border: 'none',
-                background: savingAll || inPipelineCount >= nonDuplicateCount ? '#E4E4E7' : DS.primary,
+                background: addedConfirm ? '#059669'
+                  : savingAll || savingProspects || inPipelineCount >= nonDuplicateCount ? '#E4E4E7'
+                  : DS.primary,
                 color: 'white', fontSize: 12, fontWeight: 600,
-                cursor: savingAll || inPipelineCount >= nonDuplicateCount ? 'not-allowed' : 'pointer',
+                cursor: savingAll || savingProspects || inPipelineCount >= nonDuplicateCount ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit',
-                boxShadow: savingAll || inPipelineCount >= nonDuplicateCount ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
+                boxShadow: savingAll || savingProspects || inPipelineCount >= nonDuplicateCount ? 'none' : `0 2px 8px ${DS.primaryGlow}`,
+                transition: 'background 0.2s',
               }}
             >
-              {savingAll ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={12} />}
-              {inPipelineCount >= nonDuplicateCount ? '✓ All in Pipeline' : savingAll ? 'Saving…' : 'Save All to Pipeline'}
+              {savingAll
+                ? <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Saving…</>
+                : addedConfirm
+                ? <><Check size={12} /> Added!</>
+                : inPipelineCount >= nonDuplicateCount
+                ? '✓ All in Pipeline'
+                : <><Plus size={12} /> Save All to Pipeline</>
+              }
             </button>
           </div>
         </div>
