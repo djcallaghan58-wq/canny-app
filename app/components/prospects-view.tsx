@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { stripDashes } from '@/lib/strip-dashes'
 import { useRouter } from 'next/navigation'
 import {
   Search, Upload, GitBranch, X, ChevronLeft, ChevronRight,
@@ -322,21 +323,21 @@ function ProspectDetail({
           {prospect.company_overview && (
             <div style={{ marginBottom: 14 }}>
               <p style={lbl}>Company Overview</p>
-              <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.65 }}>{prospect.company_overview}</p>
+              <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.65 }}>{stripDashes(prospect.company_overview)}</p>
             </div>
           )}
 
           {prospect.pain_points && (
             <div style={{ marginBottom: 14 }}>
               <p style={lbl}>Pain Points</p>
-              <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.65 }}>{prospect.pain_points}</p>
+              <p style={{ fontSize: 12.5, color: DS.secondary, lineHeight: 1.65 }}>{stripDashes(prospect.pain_points)}</p>
             </div>
           )}
 
           {prospect.pitch_angle && (
             <div style={{ marginBottom: 14, borderLeft: `3px solid ${DS.primary}`, paddingLeft: 10, background: DS.accentMid, borderRadius: '0 7px 7px 0', padding: '9px 12px 9px 11px' }}>
               <p style={lbl}>Pitch Angle</p>
-              <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.65, fontWeight: 500 }}>{prospect.pitch_angle}</p>
+              <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.65, fontWeight: 500 }}>{stripDashes(prospect.pitch_angle)}</p>
             </div>
           )}
 
@@ -857,14 +858,14 @@ function AISearchTab({
 
                   {/* Overview */}
                   {r.overview && (
-                    <p style={{ fontSize: 11.5, color: DS.secondary, lineHeight: 1.6, marginBottom: 9 }}>{r.overview}</p>
+                    <p style={{ fontSize: 11.5, color: DS.secondary, lineHeight: 1.6, marginBottom: 9 }}>{stripDashes(r.overview)}</p>
                   )}
 
                   {/* Pain points */}
                   {r.pain_points && (
                     <div style={{ marginBottom: 8 }}>
                       <p style={sl}>Pain Points</p>
-                      <p style={{ fontSize: 11.5, color: DS.secondary, lineHeight: 1.6 }}>{r.pain_points}</p>
+                      <p style={{ fontSize: 11.5, color: DS.secondary, lineHeight: 1.6 }}>{stripDashes(r.pain_points)}</p>
                     </div>
                   )}
 
@@ -878,7 +879,7 @@ function AISearchTab({
                       padding: '8px 11px',
                     }}>
                       <p style={sl}>Pitch</p>
-                      <p style={{ fontSize: 11.5, color: DS.bodyText, lineHeight: 1.6, fontWeight: 500 }}>{r.pitch_angle}</p>
+                      <p style={{ fontSize: 11.5, color: DS.bodyText, lineHeight: 1.6, fontWeight: 500 }}>{stripDashes(r.pitch_angle)}</p>
                     </div>
                   )}
 

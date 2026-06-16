@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { auth } from '@clerk/nextjs/server'
+import { stripDashes } from '@/lib/strip-dashes'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -54,5 +55,5 @@ export async function POST(req: Request) {
     .map(block => block.text)
     .join('')
 
-  return Response.json({ reply: text || 'Try again.' })
+  return Response.json({ reply: stripDashes(text) || 'Try again.' })
 }

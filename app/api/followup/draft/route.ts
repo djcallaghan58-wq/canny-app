@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { auth } from '@clerk/nextjs/server'
+import { stripDashes } from '@/lib/strip-dashes'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -12,8 +13,9 @@ export async function POST(req: Request) {
 
   const bizContext = [
     `You are writing on behalf of ${business.name}${business.industry ? `, a ${business.industry} company` : ''}.`,
-    business.main_service        ? ` Their main service: ${business.main_service}.`               : '',
-    business.business_description ? ` About the business: ${business.business_description}.`      : '',
+    business.main_service         ? ` Their main service: ${business.main_service}.`          : '',
+    business.business_description ? ` About the business: ${business.business_description}.`  : '',
+    ` Rules: short sentences, no em dashes or en dashes, no "leverage" "streamline" "seamlessly" "tailored" "cutting-edge". Sound like a real person.`,
   ].join('')
 
   let prompt: string
@@ -71,7 +73,10 @@ export async function POST(req: Request) {
     const match = raw.match(/\{[\s\S]*\}/)
     if (match) {
       const parsed = JSON.parse(match[0])
-      return Response.json({ subject: parsed.subject, body: parsed.body })
+      return Response.json({
+        subject: stripDashes(parsed.subject ?? ''),
+        body:    stripDashes(parsed.body    ?? ''),
+      })
     }
     return Response.json({ error: 'Could not generate email' }, { status: 422 })
   } catch (e) {

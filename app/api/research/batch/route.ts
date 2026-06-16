@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { auth } from '@clerk/nextjs/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { scrapeCompanyContact } from '@/lib/research-scraper'
+import { stripDashesFromObject } from '@/lib/strip-dashes'
 
 export const maxDuration = 300
 
@@ -109,6 +110,7 @@ async function researchOneProspect(
         business.business_description       ? ` About the business: ${business.business_description}.`   : '',
         business.ideal_customer_description ? ` Ideal customer: ${business.ideal_customer_description}.` : '',
         ` Be specific. Use web search, then call return_prospect.`,
+        ` Writing rules: short sentences, no em dashes or en dashes, no words like "leverage" "streamline" "seamlessly" "game-changer" "tailored" "cutting-edge" "robust". Write like a real person who knows this business.`,
       ].join(''),
       tools: [
         { type: 'web_search_20250305' as const, name: 'web_search' },
@@ -121,14 +123,14 @@ async function researchOneProspect(
               company_name:  { type: 'string' },
               website:       { type: 'string' },
               location:      { type: 'string' },
-              overview:      { type: 'string',  description: '1-2 sentence overview' },
-              contact_name:  { type: 'string',  description: 'Key decision maker' },
+              overview:      { type: 'string',  description: '1-2 short sentences about what they do. No em dashes.' },
+              contact_name:  { type: 'string',  description: 'Key decision maker full name' },
               contact_title: { type: 'string' },
               email_format:  { type: 'string',  description: 'e.g. firstname@company.com' },
-              pain_points:   { type: 'string',  description: 'Pain points relevant to our service' },
-              pitch_angle:   { type: 'string',  description: '1-2 sentence personalized pitch' },
-              email_subject: { type: 'string' },
-              email_body:    { type: 'string',  description: 'Cold email body, max 80 words, no buzzwords' },
+              pain_points:   { type: 'string',  description: 'One specific pain point relevant to our service. Plain English, one sentence.' },
+              pitch_angle:   { type: 'string',  description: 'One sentence, plain English, no fluff. Sounds like a real person wrote it.' },
+              email_subject: { type: 'string',  description: 'Under 8 words, no punctuation, no em dashes.' },
+              email_body:    { type: 'string',  description: '3-4 sentences max. One specific pain point, one specific pitch, one CTA. No em dashes, no buzzwords.' },
             },
             required: ['company_name', 'overview', 'pain_points', 'pitch_angle', 'email_subject', 'email_body'],
           },
@@ -136,14 +138,15 @@ async function researchOneProspect(
       ],
       messages: [{
         role:    'user',
-        content: `Research "${target}". Find contact info, identify pain points relevant to ${business.main_service || 'our services'}, and draft a brief cold email.`,
+        content: `Research "${target}". Find contact info, identify a specific pain point relevant to ${business.main_service || 'our services'}, and draft a short cold email. No em dashes anywhere.`,
       }],
     })
 
     const toolCall = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'return_prospect'
     )
-    return toolCall ? (toolCall.input as BatchResult) : null
+    if (!toolCall) return null
+    return stripDashesFromObject(toolCall.input as Record<string, unknown>) as unknown as BatchResult
   } catch {
     return null
   }

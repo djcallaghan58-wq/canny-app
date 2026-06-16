@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { auth } from '@clerk/nextjs/server'
+import { stripDashes } from '@/lib/strip-dashes'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -11,10 +12,12 @@ export async function POST(req: Request) {
   if (!prospect || !business) return Response.json({ error: 'Missing data' }, { status: 400 })
 
   const system = [
-    `You are a cold email copywriter for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}.`,
-    business.business_description       ? ` About the business: ${business.business_description}.`       : '',
-    business.ideal_customer_description ? ` Ideal customer: ${business.ideal_customer_description}.`     : '',
-    ` Write concise, personalized, non-pushy cold emails that get replies. No buzzwords. Short paragraphs. Max 150 words in the body.`,
+    `You write cold outreach emails for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}.`,
+    business.business_description       ? ` About the business: ${business.business_description}.`   : '',
+    business.ideal_customer_description ? ` Ideal customer: ${business.ideal_customer_description}.` : '',
+    ` Rules: short sentences, no em dashes or en dashes, no "leverage" "streamline" "seamlessly" "game-changer" "tailored" "cutting-edge" "robust".`,
+    ` Subject: under 8 words, no punctuation, no dashes.`,
+    ` Body: 3-4 sentences max. One specific pain point, one specific pitch, one CTA. Sound like a real person.`,
   ].join('')
 
   const context = [
@@ -31,10 +34,10 @@ export async function POST(req: Request) {
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model:      'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: context }],
+      system:     [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      messages:   [{ role: 'user', content: context }],
     })
 
     const raw = response.content
@@ -44,7 +47,10 @@ export async function POST(req: Request) {
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
-      return Response.json({ subject: parsed.subject, body: parsed.body })
+      return Response.json({
+        subject: stripDashes(parsed.subject ?? ''),
+        body:    stripDashes(parsed.body    ?? ''),
+      })
     }
 
     return Response.json({ error: 'Could not generate email' }, { status: 422 })
