@@ -99,9 +99,16 @@ export async function saveProspectFromSearch(input: {
     const supabase = createAdminClient()
 
     const biz = await resolveBusinessForUser(userId)
-    if (!biz || biz.id !== input.business_id) return { success: false, error: 'Business not found' }
+    if (!biz) {
+      console.error('[saveProspectFromSearch] resolveBusinessForUser returned null for userId:', userId)
+      return { success: false, error: 'Business not found for this user' }
+    }
+    if (biz.id !== input.business_id) {
+      console.error('[saveProspectFromSearch] business_id mismatch:', { resolved: biz.id, provided: input.business_id })
+      return { success: false, error: `Business ID mismatch (resolved: ${biz.id}, provided: ${input.business_id})` }
+    }
 
-    // Dedup check: same company_name + business_id
+    // Dedup check
     const { data: existing } = await supabase
       .from('prospects')
       .select('id, company_name, status')
@@ -118,18 +125,24 @@ export async function saveProspectFromSearch(input: {
       .insert({
         ...input,
         company_name: input.company_name.trim(),
-        stage: 'Researched',
-        status: 'new',
+        stage:    'Researched',
+        status:   'new',
         enriched: true,
-        source: input.source ?? 'ai_search',
+        source:   input.source ?? 'ai_search',
       })
       .select()
       .single()
 
-    if (error) return { success: false, error: error.message }
+    if (error) {
+      console.error('[saveProspectFromSearch] insert error:', {
+        code: error.code, message: error.message, details: error.details,
+      })
+      return { success: false, error: `${error.code ?? 'ERR'}: ${error.message}` }
+    }
     revalidatePath('/dashboard/prospects')
     return { success: true, prospect: data as Prospect }
   } catch (e) {
+    console.error('[saveProspectFromSearch] unexpected error:', e)
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
   }
 }
@@ -146,38 +159,74 @@ export async function moveToLeadsPipeline(
   try {
     const supabase = createAdminClient()
 
-    const { data: prospect } = await supabase
+    // Fetch the prospect row
+    const { data: prospect, error: fetchErr } = await supabase
       .from('prospects')
       .select('*')
       .eq('id', prospectId)
       .eq('business_id', businessId)
       .maybeSingle()
 
-    if (!prospect) return { success: false, error: 'Prospect not found' }
+    if (fetchErr) {
+      console.error('[moveToLeadsPipeline] prospect fetch error:', fetchErr)
+      return { success: false, error: `Prospect fetch: ${fetchErr.message}` }
+    }
+    if (!prospect) {
+      console.error('[moveToLeadsPipeline] prospect not found', { prospectId, businessId })
+      return { success: false, error: 'Prospect not found' }
+    }
 
-    // Create lead record
-    const { data: lead, error: leadError } = await supabase
+    // Build insert payload — log it before sending
+    const insertPayload: Record<string, unknown> = {
+      business_id:    businessId,
+      customer_name:  prospect.contact_name || prospect.company_name,
+      customer_email: prospect.email ?? '',
+      customer_phone: prospect.phone ?? '',
+      service_type:   prospect.company_overview ? prospect.company_overview.slice(0, 80) : '',
+      urgency:        'Medium',
+      stage:          'New Lead',
+      source:         'prospecting',
+      value:          prospect.value ?? 0,
+      notes: [
+        prospect.pain_points ? `Pain points: ${prospect.pain_points}` : '',
+        prospect.pitch_angle ? `Pitch: ${prospect.pitch_angle}` : '',
+        prospect.notes       ? prospect.notes : '',
+      ].filter(Boolean).join('\n\n'),
+    }
+
+    console.log('[moveToLeadsPipeline] inserting lead:', {
+      businessId,
+      prospectId,
+      customer_name: insertPayload.customer_name,
+      stage: insertPayload.stage,
+      source: insertPayload.source,
+    })
+
+    let { data: lead, error: leadError } = await supabase
       .from('leads')
-      .insert({
-        business_id:   businessId,
-        customer_name: prospect.contact_name || prospect.company_name,
-        customer_email: prospect.email ?? '',
-        customer_phone: prospect.phone ?? '',
-        service_type:  prospect.company_overview ? prospect.company_overview.slice(0, 80) : '',
-        urgency:       'Medium',
-        stage:         'New Lead',
-        source:        'prospecting',
-        value:         prospect.value ?? 0,
-        notes: [
-          prospect.pain_points ? `Pain points: ${prospect.pain_points}` : '',
-          prospect.pitch_angle ? `Pitch: ${prospect.pitch_angle}` : '',
-          prospect.notes       ? prospect.notes : '',
-        ].filter(Boolean).join('\n\n'),
-      })
+      .insert(insertPayload)
       .select('id')
       .single()
 
-    if (leadError) return { success: false, error: leadError.message }
+    // If source column doesn't exist yet, retry without it
+    if (leadError && (leadError.code === '42703' || leadError.message?.includes('"source"'))) {
+      console.warn('[moveToLeadsPipeline] source column missing — retrying without it. Run: ALTER TABLE leads ADD COLUMN IF NOT EXISTS source text DEFAULT \'direct\';')
+      const withoutSource = { ...insertPayload }
+      delete withoutSource.source
+      const retry = await supabase.from('leads').insert(withoutSource).select('id').single()
+      lead      = retry.data
+      leadError = retry.error
+    }
+
+    if (leadError) {
+      console.error('[moveToLeadsPipeline] lead insert error:', {
+        code:    leadError.code,
+        message: leadError.message,
+        details: leadError.details,
+        hint:    leadError.hint,
+      })
+      return { success: false, error: `${leadError.code ?? 'ERR'}: ${leadError.message}` }
+    }
 
     // Update prospect status
     await supabase
@@ -187,8 +236,10 @@ export async function moveToLeadsPipeline(
 
     revalidatePath('/dashboard/prospects')
     revalidatePath('/dashboard/pipeline')
-    return { success: true, leadId: lead.id }
+    console.log('[moveToLeadsPipeline] success, leadId:', lead!.id)
+    return { success: true, leadId: lead!.id }
   } catch (e) {
+    console.error('[moveToLeadsPipeline] unexpected error:', e)
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
   }
 }
