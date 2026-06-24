@@ -127,6 +127,7 @@ function EmailModal({ email, onClose, onOpen, businessId }: {
   businessId?: string
 }) {
   const [subject,    setSubject]    = useState(email.subject)
+  const [subjectB,   setSubjectB]   = useState(email.subjectB ?? '')
   const [body,       setBody]       = useState(email.body)
   const [saving,     setSaving]     = useState(false)
   const [styleSaved, setStyleSaved] = useState(false)
@@ -226,11 +227,17 @@ function EmailModal({ email, onClose, onOpen, businessId }: {
           />
         </div>
 
-        {/* Subject B — read-only alternative */}
+        {/* Subject B — editable when present */}
         {email.subjectB && (
-          <div style={{ background: DS.pageBg, borderRadius: 8, padding: '8px 13px', marginBottom: 12, border: `1px solid ${DS.cardBorder}` }}>
-            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>Alt Subject</p>
-            <p style={{ fontSize: 12.5, color: DS.secondary }}>{email.subjectB}</p>
+          <div style={{ marginBottom: 12 }}>
+            <label style={fieldLbl}>Subject B</label>
+            <input
+              type="text"
+              value={subjectB}
+              onChange={e => setSubjectB(e.target.value)}
+              style={inputSt}
+              onFocus={onFocus} onBlur={onBlur}
+            />
           </div>
         )}
 

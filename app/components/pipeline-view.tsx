@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, ChevronLeft, ChevronRight, Bot, X, Bell, Mail, Loader2 } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Bot, X, Bell, Mail, Loader2, Check } from 'lucide-react'
 import type { Business, Lead, LeadStage, Prospect } from '@/lib/supabase'
 import { updateLeadStage, createLead } from '@/app/actions/leads'
 import { getProspectById } from '@/app/actions/prospects'
+import { saveEmailAsStyle } from '@/app/actions/writing-styles'
 import { FollowupsTab } from '@/app/components/followups-tab'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -62,23 +63,70 @@ function isStale(lead: Lead): boolean {
 
 // ── Email modal (for prospect-linked leads) ───────────────────────────────────
 
-function PipelineEmailModal({ subject, body, email, onClose }: {
-  subject: string; body: string; email: string; onClose: () => void
+function PipelineEmailModal({ subject: initialSubject, body: initialBody, email, businessId, onClose }: {
+  subject: string; body: string; email: string; businessId?: string; onClose: () => void
 }) {
+  const [subject,    setSubject]    = useState(initialSubject)
+  const [body,       setBody]       = useState(initialBody)
+  const [saving,     setSaving]     = useState(false)
+  const [styleSaved, setStyleSaved] = useState(false)
+  const [styleError, setStyleError] = useState('')
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [body])
+
   const open = () => {
-    const to  = encodeURIComponent(email)
-    const su  = encodeURIComponent(subject)
-    const bd  = encodeURIComponent(body)
+    const to = encodeURIComponent(email)
+    const su = encodeURIComponent(subject)
+    const bd = encodeURIComponent(body)
     window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${bd}`, '_blank')
     onClose()
   }
+
+  const handleSaveStyle = async () => {
+    if (!businessId || saving) return
+    setSaving(true); setStyleError(''); setStyleSaved(false)
+    const res = await saveEmailAsStyle(businessId, body)
+    setSaving(false)
+    if (res.success) { setStyleSaved(true); setTimeout(() => setStyleSaved(false), 3000) }
+    else { setStyleError(res.error ?? 'Could not save style') }
+  }
+
+  const inputSt: React.CSSProperties = {
+    width: '100%', padding: '8px 11px',
+    background: DS.cardBg, border: `1.5px solid ${DS.outlineBorder}`,
+    borderRadius: 7, fontSize: 13, color: DS.bodyText,
+    fontFamily: 'inherit', outline: 'none',
+    transition: 'border-color 0.15s, box-shadow 0.15s',
+  }
+  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    e.target.style.borderColor = DS.primary
+    e.target.style.boxShadow   = `0 0 0 3px ${DS.primaryGlow}`
+    e.target.style.background  = '#fff'
+  }
+  const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    e.target.style.borderColor = DS.outlineBorder
+    e.target.style.boxShadow   = 'none'
+    e.target.style.background  = DS.cardBg
+  }
+  const lbl: React.CSSProperties = {
+    fontSize: 9.5, fontWeight: 700, color: DS.muted,
+    letterSpacing: '0.5px', textTransform: 'uppercase',
+    display: 'block', marginBottom: 5,
+  }
+
   return (
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.4)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500, padding: 16 }}
       onClick={onClose}
     >
       <div
-        style={{ background: DS.cardBg, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.12)', border: `1px solid ${DS.cardBorder}`, maxHeight: '85vh', overflowY: 'auto' }}
+        style={{ background: DS.cardBg, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.12)', border: `1px solid ${DS.cardBorder}`, maxHeight: '90vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -88,20 +136,57 @@ function PipelineEmailModal({ subject, body, email, onClose }: {
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.muted, padding: 4 }}><X size={15} /></button>
         </div>
+
         {email && (
-          <div style={{ background: DS.accentLight, borderRadius: 8, padding: '8px 13px', marginBottom: 10 }}>
-            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>To</p>
+          <div style={{ background: DS.accentLight, borderRadius: 8, padding: '8px 13px', marginBottom: 12 }}>
+            <p style={{ ...lbl, marginBottom: 2 }}>To</p>
             <p style={{ fontSize: 12.5, color: DS.primary, fontWeight: 500 }}>{email}</p>
           </div>
         )}
-        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 10 }}>
-          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject</p>
-          <p style={{ fontSize: 13, color: DS.bodyText, fontWeight: 500 }}>{subject}</p>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>Subject</label>
+          <input type="text" value={subject} onChange={e => setSubject(e.target.value)} style={inputSt} onFocus={onFocus} onBlur={onBlur} />
         </div>
-        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 18 }}>
-          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 7 }}>Body</p>
-          <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{body}</p>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>Body</label>
+          <textarea
+            ref={bodyRef}
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            style={{ ...inputSt, resize: 'none', lineHeight: 1.7, minHeight: 120, overflow: 'hidden' }}
+            onFocus={onFocus} onBlur={onBlur}
+          />
         </div>
+
+        {businessId && (
+          <div style={{ marginBottom: 14 }}>
+            <button
+              onClick={handleSaveStyle}
+              disabled={saving || styleSaved}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 7,
+                border: `1.5px solid ${styleSaved ? DS.primary : DS.outlineBorder}`,
+                background: styleSaved ? DS.accentLight : 'transparent',
+                color: styleSaved ? DS.primary : DS.outlineText,
+                fontSize: 12, fontWeight: 600,
+                cursor: saving || styleSaved ? 'default' : 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.15s',
+              }}
+            >
+              {saving
+                ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Saving style…</>
+                : styleSaved
+                ? <><Check size={11} /> Style saved</>
+                : 'Save to writing style'
+              }
+            </button>
+            {styleError && <p style={{ fontSize: 11.5, color: '#DC2626', marginTop: 6, fontWeight: 500 }}>⚠ {styleError}</p>}
+          </div>
+        )}
+
         <button
           onClick={open}
           style={{
@@ -694,6 +779,7 @@ export function PipelineView({
           subject={draftEmailData.subject}
           body={draftEmailData.body}
           email={draftEmailData.email}
+          businessId={business.id}
           onClose={() => setDraftEmailData(null)}
         />
       )}
