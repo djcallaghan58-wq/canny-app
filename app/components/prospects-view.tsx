@@ -13,6 +13,7 @@ import {
   saveProspectFromSearch, checkRecentSearch, saveSearch, moveToLeadsPipeline,
   getProspects,
 } from '@/app/actions/prospects'
+import { saveEmailAsStyle } from '@/app/actions/writing-styles'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
@@ -119,19 +120,70 @@ function getInitials(name: string): string {
 
 // ── Draft Email Modal ─────────────────────────────────────────────────────────
 
-function EmailModal({ email, onClose, onOpen }: {
-  email:    DraftEmail
-  onClose:  () => void
-  onOpen?:  () => void   // fires after Gmail window opens (PATH 1: auto-create pipeline lead)
+function EmailModal({ email, onClose, onOpen, businessId }: {
+  email:       DraftEmail
+  onClose:     () => void
+  onOpen?:     () => void   // fires after Gmail window opens (PATH 1: auto-create pipeline lead)
+  businessId?: string
 }) {
+  const [subject,    setSubject]    = useState(email.subject)
+  const [body,       setBody]       = useState(email.body)
+  const [saving,     setSaving]     = useState(false)
+  const [styleSaved, setStyleSaved] = useState(false)
+  const [styleError, setStyleError] = useState('')
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-expand textarea to fit content
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [body])
+
   const openMailto = () => {
-    const to      = encodeURIComponent(email.email ?? '')
-    const subject = encodeURIComponent(email.subject)
-    const body    = encodeURIComponent(email.body)
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${body}`
-    window.open(gmailUrl, '_blank')
+    const to  = encodeURIComponent(email.email ?? '')
+    const su  = encodeURIComponent(subject)
+    const bd  = encodeURIComponent(body)
+    window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${bd}`, '_blank')
     onOpen?.()   // fire-and-forget; caller owns the async work
     onClose()
+  }
+
+  const handleSaveStyle = async () => {
+    if (!businessId || saving) return
+    setSaving(true); setStyleError(''); setStyleSaved(false)
+    const res = await saveEmailAsStyle(businessId, body)
+    setSaving(false)
+    if (res.success) {
+      setStyleSaved(true)
+      setTimeout(() => setStyleSaved(false), 3000)
+    } else {
+      setStyleError(res.error ?? 'Could not save style')
+    }
+  }
+
+  const fieldLbl: React.CSSProperties = {
+    fontSize: 9.5, fontWeight: 700, color: DS.muted,
+    letterSpacing: '0.5px', textTransform: 'uppercase',
+    display: 'block', marginBottom: 5,
+  }
+  const inputSt: React.CSSProperties = {
+    width: '100%', background: DS.cardBg,
+    border: `1.5px solid ${DS.outlineBorder}`, borderRadius: 7,
+    fontSize: 13, color: DS.bodyText, fontFamily: 'inherit',
+    outline: 'none', transition: 'border-color 0.15s, box-shadow 0.15s',
+    padding: '8px 11px',
+  }
+  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    e.target.style.borderColor = DS.primary
+    e.target.style.boxShadow   = `0 0 0 3px ${DS.primaryGlow}`
+    e.target.style.background  = '#fff'
+  }
+  const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    e.target.style.borderColor = DS.outlineBorder
+    e.target.style.boxShadow   = 'none'
+    e.target.style.background  = DS.cardBg
   }
 
   return (
@@ -140,9 +192,10 @@ function EmailModal({ email, onClose, onOpen }: {
       onClick={onClose}
     >
       <div
-        style={{ background: DS.cardBg, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.12)', border: `1px solid ${DS.cardBorder}`, maxHeight: '85vh', overflowY: 'auto' }}
+        style={{ background: DS.cardBg, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, boxShadow: '0 20px 48px rgba(0,0,0,0.12)', border: `1px solid ${DS.cardBorder}`, maxHeight: '90vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <Mail size={15} color={DS.secondary} />
@@ -153,29 +206,77 @@ function EmailModal({ email, onClose, onOpen }: {
           </button>
         </div>
 
+        {/* To (read-only) */}
         {email.email && (
-          <div style={{ background: DS.accentLight, borderRadius: 8, padding: '8px 13px', marginBottom: 10 }}>
+          <div style={{ background: DS.accentLight, borderRadius: 8, padding: '8px 13px', marginBottom: 12 }}>
             <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>To</p>
             <p style={{ fontSize: 12.5, color: DS.primary, fontWeight: 500 }}>{email.email}</p>
           </div>
         )}
 
-        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 10 }}>
-          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject A</p>
-          <p style={{ fontSize: 13, color: DS.bodyText, fontWeight: 500 }}>{email.subject}</p>
+        {/* Subject — editable */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={fieldLbl}>Subject</label>
+          <input
+            type="text"
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
+            style={inputSt}
+            onFocus={onFocus} onBlur={onBlur}
+          />
         </div>
+
+        {/* Subject B — read-only alternative */}
         {email.subjectB && (
-          <div style={{ background: DS.pageBg, borderRadius: 8, padding: '10px 13px', marginBottom: 10, border: `1px solid ${DS.cardBorder}` }}>
-            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 3 }}>Subject B</p>
-            <p style={{ fontSize: 13, color: DS.secondary, fontWeight: 500 }}>{email.subjectB}</p>
+          <div style={{ background: DS.pageBg, borderRadius: 8, padding: '8px 13px', marginBottom: 12, border: `1px solid ${DS.cardBorder}` }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>Alt Subject</p>
+            <p style={{ fontSize: 12.5, color: DS.secondary }}>{email.subjectB}</p>
           </div>
         )}
 
-        <div style={{ background: DS.accentMid, borderRadius: 8, padding: '10px 13px', marginBottom: 18 }}>
-          <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 7 }}>Body</p>
-          <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{email.body}</p>
+        {/* Body — editable, auto-expands */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={fieldLbl}>Body</label>
+          <textarea
+            ref={bodyRef}
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            style={{ ...inputSt, resize: 'none', lineHeight: 1.7, minHeight: 120, overflow: 'hidden' }}
+            onFocus={onFocus} onBlur={onBlur}
+          />
         </div>
 
+        {/* Save to writing style */}
+        {businessId && (
+          <div style={{ marginBottom: 14 }}>
+            <button
+              onClick={handleSaveStyle}
+              disabled={saving || styleSaved}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 7,
+                border: `1.5px solid ${styleSaved ? DS.primary : DS.outlineBorder}`,
+                background: styleSaved ? DS.accentLight : 'transparent',
+                color: styleSaved ? DS.primary : DS.outlineText,
+                fontSize: 12, fontWeight: 600,
+                cursor: saving || styleSaved ? 'default' : 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.15s',
+              }}
+            >
+              {saving
+                ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Saving style…</>
+                : styleSaved
+                ? <><Check size={11} /> Style saved</>
+                : 'Save edits to writing style'
+              }
+            </button>
+            {styleError && (
+              <p style={{ fontSize: 11.5, color: '#DC2626', marginTop: 6, fontWeight: 500 }}>⚠ {styleError}</p>
+            )}
+          </div>
+        )}
+
+        {/* Open in Gmail */}
         <button
           onClick={openMailto}
           style={{
@@ -187,7 +288,7 @@ function EmailModal({ email, onClose, onOpen }: {
             boxShadow: `0 2px 8px rgba(29,158,117,0.25)`, minHeight: 40,
           }}
         >
-          <Mail size={13} /> Open in Email Client
+          <Mail size={13} /> Open in Gmail
         </button>
       </div>
     </div>
@@ -439,7 +540,7 @@ function ProspectDetail({
         </div>
       </div>
 
-      {draftEmail && <EmailModal email={draftEmail} onClose={() => setDraftEmail(null)} />}
+      {draftEmail && <EmailModal email={draftEmail} onClose={() => setDraftEmail(null)} businessId={business.id} />}
     </>
   )
 }
@@ -1111,6 +1212,7 @@ function AISearchTab({
       {emailModal && (
         <EmailModal
           email={emailModal}
+          businessId={business.id}
           onClose={() => { setEmailModal(null); setDraftCardIdx(null) }}
           onOpen={() => {
             if (draftCardIdx === null) return
@@ -1476,7 +1578,7 @@ function PipelineTab({
           )
         })}
       </div>
-      {draftEmail && <EmailModal email={draftEmail} onClose={() => { setDraftEmail(null); setDraftFor(null) }} />}
+      {draftEmail && <EmailModal email={draftEmail} onClose={() => { setDraftEmail(null); setDraftFor(null) }} businessId={business.id} />}
     </>
   )
 }
