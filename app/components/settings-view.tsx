@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Settings } from 'lucide-react'
-import type { Business } from '@/lib/supabase'
+import { Settings, Sparkles } from 'lucide-react'
+import type { Business, WritingStyleRow } from '@/lib/supabase'
 import { updateBusiness, inviteTeamMember } from '@/app/actions/business'
+import { WritingStylesPanel } from '@/app/components/style-manager'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
@@ -32,9 +33,17 @@ const FIELDS = [
 ] as const
 
 type FieldKey = typeof FIELDS[number]['key']
+type Tab = 'profile' | 'style'
 
-export function SettingsView({ business }: { business: Business }) {
+export function SettingsView({
+  business,
+  initialStyles,
+}: {
+  business:      Business
+  initialStyles: WritingStyleRow[]
+}) {
   const router = useRouter()
+  const [activeTab, setActiveTab] = useState<Tab>('profile')
 
   const [form, setForm] = useState<Record<FieldKey, string>>({
     name:           business.name,
@@ -55,7 +64,6 @@ export function SettingsView({ business }: { business: Business }) {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError,   setInviteError]   = useState('')
 
-  // Follow-up schedule
   const defaultSched = business.follow_up_schedule ?? { first: 3, second: 7, third: 14 }
   const [fuFirst,  setFuFirst]  = useState(String(defaultSched.first))
   const [fuSecond, setFuSecond] = useState(String(defaultSched.second))
@@ -88,29 +96,23 @@ export function SettingsView({ business }: { business: Business }) {
     setInviting(true); setInviteSuccess(''); setInviteError('')
     const result = await inviteTeamMember(inviteEmail.trim())
     setInviting(false)
-    if (result.success) {
-      setInviteSuccess(`Invitation sent to ${inviteEmail.trim()}`)
-      setInviteEmail('')
-    } else {
-      setInviteError(result.error ?? 'Could not send invitation.')
-    }
+    if (result.success) { setInviteSuccess(`Invitation sent to ${inviteEmail.trim()}`); setInviteEmail('') }
+    else { setInviteError(result.error ?? 'Could not send invitation.') }
   }
 
   const handleSave = async () => {
     if (saving) return
     setSaving(true); setSaved(false); setError('')
-
     const result = await updateBusiness({
-      name:                       form.name.trim()                     || undefined,
-      industry:                   form.industry.trim()                  || undefined,
-      ideal_customer:             form.ideal_customer.trim()            || undefined,
-      main_service:               form.main_service.trim()              || undefined,
-      city:                       form.city.trim()                      || undefined,
-      phone:                      form.phone.trim()                     || undefined,
-      business_description:       businessDescription.trim()            || undefined,
-      ideal_customer_description: idealCustomerDescription.trim()       || undefined,
+      name:                       form.name.trim()                || undefined,
+      industry:                   form.industry.trim()             || undefined,
+      ideal_customer:             form.ideal_customer.trim()       || undefined,
+      main_service:               form.main_service.trim()         || undefined,
+      city:                       form.city.trim()                 || undefined,
+      phone:                      form.phone.trim()                || undefined,
+      business_description:       businessDescription.trim()       || undefined,
+      ideal_customer_description: idealCustomerDescription.trim()  || undefined,
     })
-
     setSaving(false)
     if (!result.success) { setError(result.error ?? 'Something went wrong.'); return }
     setSaved(true)
@@ -131,237 +133,159 @@ export function SettingsView({ business }: { business: Business }) {
   }
 
   const sectionCard: React.CSSProperties = {
-    background:   DS.cardBg,
-    border:       `1px solid ${DS.cardBorder}`,
-    borderRadius: 12,
-    padding:      '24px',
-    boxShadow:    '0 1px 3px rgba(0,0,0,0.05)',
+    background: DS.cardBg, border: `1px solid ${DS.cardBorder}`,
+    borderRadius: 12, padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
   }
 
+  const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+    { id: 'profile', label: 'Business Profile', icon: Settings  },
+    { id: 'style',   label: 'Writing Style',    icon: Sparkles  },
+  ]
+
   return (
-    <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Page header */}
-      <div style={{
-        padding: '16px 24px 14px', flexShrink: 0,
-        borderBottom: `1px solid ${DS.cardBorder}`,
-        background: DS.cardBg,
-        display: 'flex', alignItems: 'center', gap: 10,
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 9,
-          background: DS.accentLight,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Settings size={16} color={DS.primary} />
-        </div>
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 1 }}>
-            {business.name}
-          </p>
-          <h1 style={{ fontSize: 16, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.3px', lineHeight: 1 }}>
-            Business Settings
-          </h1>
-        </div>
-      </div>
-
-      <div style={{ padding: '24px', maxWidth: 600 }}>
-
-        {/* Business Profile */}
-        <div style={sectionCard}>
-          <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 18 }}>
-            Business Profile
-          </p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {FIELDS.map(({ key, label, placeholder, type }) => (
-              <div key={key}>
-                <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
-                  {label}
-                </label>
-                <input
-                  type={type}
-                  placeholder={placeholder}
-                  value={form[key]}
-                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                  onFocus={onFocus} onBlur={onBlur}
-                  style={inputStyle}
-                />
-              </div>
-            ))}
-
-            <div>
-              <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
-                About Your Business
-              </label>
-              <textarea
-                value={businessDescription}
-                onChange={e => setBusinessDescription(e.target.value)}
-                rows={3}
-                placeholder="Tell us about your business — what you do, who you serve, what makes you different."
-                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
-                onFocus={onFocus} onBlur={onBlur}
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
-                Ideal Customer Description
-              </label>
-              <textarea
-                value={idealCustomerDescription}
-                onChange={e => setIdealCustomerDescription(e.target.value)}
-                rows={3}
-                placeholder="Describe your ideal customer in your own words."
-                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
-                onFocus={onFocus} onBlur={onBlur}
-              />
-            </div>
+      {/* Header + tabs */}
+      <div style={{ padding: '16px 24px 0', flexShrink: 0, borderBottom: `1px solid ${DS.cardBorder}`, background: DS.cardBg }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: DS.accentLight, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Settings size={16} color={DS.primary} />
           </div>
-
-          {error && (
-            <p style={{ marginTop: 14, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {error}</p>
-          )}
-
-          <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={{
-                padding: '9px 22px', borderRadius: 6, border: 'none',
-                background: saving ? '#E4E4E7' : DS.primary,
-                color: 'white', fontSize: 12, fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit',
-                boxShadow: saving ? 'none' : `0 2px 10px ${DS.primaryGlow}`,
-                transition: 'all 0.2s', minHeight: 38,
-              }}
-            >
-              {saving ? 'Saving…' : 'Save Changes'}
-            </button>
-            {saved && (
-              <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ Saved</span>
-            )}
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 1 }}>{business.name}</p>
+            <h1 style={{ fontSize: 16, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.3px', lineHeight: 1 }}>Settings</h1>
           </div>
         </div>
 
-        {/* Team Members */}
-        <div style={{ ...sectionCard, marginTop: 16 }}>
-          <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>
-            Team Members
-          </p>
-          <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 18 }}>
-            Invite teammates to collaborate on your pipeline and prospects. They'll see the same data as you.
-          </p>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="email"
-              placeholder="teammate@company.com"
-              value={inviteEmail}
-              onChange={e => { setInviteEmail(e.target.value); setInviteSuccess(''); setInviteError('') }}
-              onKeyDown={e => e.key === 'Enter' && handleInvite()}
-              onFocus={onFocus} onBlur={onBlur}
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <button
-              onClick={handleInvite}
-              disabled={!inviteEmail.trim() || inviting}
-              style={{
-                padding: '9px 18px', borderRadius: 6, border: 'none', flexShrink: 0,
-                background: inviteEmail.trim() && !inviting ? DS.primary : '#E4E4E7',
-                color: 'white', fontSize: 12, fontWeight: 600,
-                cursor: inviteEmail.trim() && !inviting ? 'pointer' : 'not-allowed',
-                fontFamily: 'inherit',
-                boxShadow: inviteEmail.trim() && !inviting ? `0 2px 10px ${DS.primaryGlow}` : 'none',
-                transition: 'all 0.2s', whiteSpace: 'nowrap' as const,
-              }}
-            >
-              {inviting ? 'Sending…' : 'Send Invite'}
-            </button>
-          </div>
-
-          {inviteSuccess && (
-            <p style={{ marginTop: 10, fontSize: 12, color: DS.primary, fontWeight: 500 }}>✓ {inviteSuccess}</p>
-          )}
-          {inviteError && (
-            <p style={{ marginTop: 10, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {inviteError}</p>
-          )}
-        </div>
-
-        {/* Follow-up Schedule */}
-        <div style={{ ...sectionCard, marginTop: 16 }}>
-          <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>
-            Follow-up Schedule
-          </p>
-          <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 18 }}>
-            How many days after last contact before each follow-up is due.
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
-            {[
-              { label: '1st Follow-up',  options: ['2', '3', '5'],        val: fuFirst,  set: setFuFirst  },
-              { label: '2nd Follow-up',  options: ['5', '7', '10'],       val: fuSecond, set: setFuSecond },
-              { label: '3rd Follow-up',  options: ['10', '14', '21'],     val: fuThird,  set: setFuThird  },
-            ].map(({ label, options, val, set }) => (
-              <div key={label}>
-                <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>
-                  {label}
-                </label>
-                <select
-                  value={val}
-                  onChange={e => set(e.target.value)}
-                  style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' as const }}
-                  onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}`; e.target.style.background = '#fff' }}
-                  onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.boxShadow = 'none'; e.target.style.background = DS.inputBg }}
-                >
-                  {options.map(o => <option key={o} value={o}>{o} days</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ borderTop: `1px solid ${DS.cardBorder}`, paddingTop: 18, marginTop: 4 }}>
-            <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>
-              Reactivation Window
-            </p>
-            <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 10 }}>
-              Flag past customers for a warm reactivation campaign after this many days.
-            </p>
-            <div style={{ maxWidth: 200 }}>
-              <select
-                value={reactDays}
-                onChange={e => setReactDays(e.target.value)}
-                style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' as const }}
-                onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}`; e.target.style.background = '#fff' }}
-                onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.boxShadow = 'none'; e.target.style.background = DS.inputBg }}
+        <div style={{ display: 'flex', gap: 2 }}>
+          {TABS.map(({ id, label, icon: Icon }) => {
+            const active = activeTab === id
+            return (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '8px 14px', borderRadius: '7px 7px 0 0',
+                  border: 'none', background: active ? DS.pageBg : 'transparent',
+                  color: active ? DS.primary : DS.secondary,
+                  fontSize: 12.5, fontWeight: active ? 700 : 500,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  borderBottom: active ? `2px solid ${DS.primary}` : '2px solid transparent',
+                  transition: 'all 0.15s', marginBottom: -1,
+                }}
               >
-                <option value="30">30 days</option>
-                <option value="60">60 days</option>
-                <option value="90">90 days</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={handleSaveFu}
-              disabled={savingFu}
-              style={{
-                padding: '9px 22px', borderRadius: 6, border: 'none',
-                background: savingFu ? '#E4E4E7' : DS.primary,
-                color: 'white', fontSize: 12, fontWeight: 600,
-                cursor: savingFu ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
-                boxShadow: savingFu ? 'none' : `0 2px 10px ${DS.primaryGlow}`,
-                transition: 'all 0.2s', minHeight: 38,
-              }}
-            >
-              {savingFu ? 'Saving…' : 'Save Schedule'}
-            </button>
-            {savedFu && <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ Saved</span>}
-          </div>
+                <Icon size={12} />
+                {label}
+              </button>
+            )
+          })}
         </div>
       </div>
+
+      {/* Business Profile tab */}
+      {activeTab === 'profile' && (
+        <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
+          <div style={{ padding: '24px', maxWidth: 600 }}>
+
+            <div style={sectionCard}>
+              <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 18 }}>Business Profile</p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {FIELDS.map(({ key, label, placeholder, type }) => (
+                  <div key={key}>
+                    <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>{label}</label>
+                    <input type={type} placeholder={placeholder} value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} onFocus={onFocus} onBlur={onBlur} style={inputStyle} />
+                  </div>
+                ))}
+
+                <div>
+                  <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>About Your Business</label>
+                  <textarea value={businessDescription} onChange={e => setBusinessDescription(e.target.value)} rows={3} placeholder="Tell us about your business — what you do, who you serve, what makes you different." style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties} onFocus={onFocus} onBlur={onBlur} />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>Ideal Customer Description</label>
+                  <textarea value={idealCustomerDescription} onChange={e => setIdealCustomerDescription(e.target.value)} rows={3} placeholder="Describe your ideal customer in your own words." style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties} onFocus={onFocus} onBlur={onBlur} />
+                </div>
+              </div>
+
+              {error && <p style={{ marginTop: 14, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {error}</p>}
+
+              <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button onClick={handleSave} disabled={saving} style={{ padding: '9px 22px', borderRadius: 6, border: 'none', background: saving ? '#E4E4E7' : DS.primary, color: 'white', fontSize: 12, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: saving ? 'none' : `0 2px 10px ${DS.primaryGlow}`, transition: 'all 0.2s', minHeight: 38 }}>
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </button>
+                {saved && <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ Saved</span>}
+              </div>
+            </div>
+
+            <div style={{ ...sectionCard, marginTop: 16 }}>
+              <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>Team Members</p>
+              <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 18 }}>Invite teammates to collaborate on your pipeline and prospects. They'll see the same data as you.</p>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="email" placeholder="teammate@company.com" value={inviteEmail} onChange={e => { setInviteEmail(e.target.value); setInviteSuccess(''); setInviteError('') }} onKeyDown={e => e.key === 'Enter' && handleInvite()} onFocus={onFocus} onBlur={onBlur} style={{ ...inputStyle, flex: 1 }} />
+                <button onClick={handleInvite} disabled={!inviteEmail.trim() || inviting} style={{ padding: '9px 18px', borderRadius: 6, border: 'none', flexShrink: 0, background: inviteEmail.trim() && !inviting ? DS.primary : '#E4E4E7', color: 'white', fontSize: 12, fontWeight: 600, cursor: inviteEmail.trim() && !inviting ? 'pointer' : 'not-allowed', fontFamily: 'inherit', boxShadow: inviteEmail.trim() && !inviting ? `0 2px 10px ${DS.primaryGlow}` : 'none', transition: 'all 0.2s', whiteSpace: 'nowrap' as const }}>
+                  {inviting ? 'Sending…' : 'Send Invite'}
+                </button>
+              </div>
+              {inviteSuccess && <p style={{ marginTop: 10, fontSize: 12, color: DS.primary, fontWeight: 500 }}>✓ {inviteSuccess}</p>}
+              {inviteError  && <p style={{ marginTop: 10, fontSize: 12, color: '#DC2626', fontWeight: 500 }}>⚠ {inviteError}</p>}
+            </div>
+
+            <div style={{ ...sectionCard, marginTop: 16 }}>
+              <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>Follow-up Schedule</p>
+              <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 18 }}>How many days after last contact before each follow-up is due.</p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+                {[
+                  { label: '1st Follow-up', options: ['2', '3', '5'],    val: fuFirst,  set: setFuFirst  },
+                  { label: '2nd Follow-up', options: ['5', '7', '10'],   val: fuSecond, set: setFuSecond },
+                  { label: '3rd Follow-up', options: ['10', '14', '21'], val: fuThird,  set: setFuThird  },
+                ].map(({ label, options, val, set }) => (
+                  <div key={label}>
+                    <label style={{ fontSize: 10.5, fontWeight: 700, color: DS.secondary, letterSpacing: '0.4px', textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>{label}</label>
+                    <select value={val} onChange={e => set(e.target.value)} style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' as const }} onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}`; e.target.style.background = '#fff' }} onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.boxShadow = 'none'; e.target.style.background = DS.inputBg }}>
+                      {options.map(o => <option key={o} value={o}>{o} days</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: `1px solid ${DS.cardBorder}`, paddingTop: 18, marginTop: 4 }}>
+                <p style={{ fontSize: 10.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5 }}>Reactivation Window</p>
+                <p style={{ fontSize: 13, color: DS.secondary, marginBottom: 10 }}>Flag past customers for a warm reactivation campaign after this many days.</p>
+                <div style={{ maxWidth: 200 }}>
+                  <select value={reactDays} onChange={e => setReactDays(e.target.value)} style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' as const }} onFocus={e => { e.target.style.borderColor = DS.primary; e.target.style.boxShadow = `0 0 0 3px ${DS.primaryGlow}`; e.target.style.background = '#fff' }} onBlur={e => { e.target.style.borderColor = DS.outlineBorder; e.target.style.boxShadow = 'none'; e.target.style.background = DS.inputBg }}>
+                    <option value="30">30 days</option>
+                    <option value="60">60 days</option>
+                    <option value="90">90 days</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button onClick={handleSaveFu} disabled={savingFu} style={{ padding: '9px 22px', borderRadius: 6, border: 'none', background: savingFu ? '#E4E4E7' : DS.primary, color: 'white', fontSize: 12, fontWeight: 600, cursor: savingFu ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: savingFu ? 'none' : `0 2px 10px ${DS.primaryGlow}`, transition: 'all 0.2s', minHeight: 38 }}>
+                  {savingFu ? 'Saving…' : 'Save Schedule'}
+                </button>
+                {savedFu && <span style={{ fontSize: 12.5, color: DS.primary, fontWeight: 600 }}>✓ Saved</span>}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Writing Style tab */}
+      {activeTab === 'style' && (
+        <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
+          <div style={{ padding: '24px', maxWidth: 900 }}>
+            <WritingStylesPanel business={business} initialStyles={initialStyles} />
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
