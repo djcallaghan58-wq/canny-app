@@ -72,6 +72,21 @@ export interface WritingStyle {
   summary: string
 }
 
+export interface WritingStyleRow {
+  id: string
+  business_id: string
+  name: string
+  is_active: boolean
+  tone: string | null
+  greeting: string | null
+  sign_off: string | null
+  key_phrases: string[]
+  sample_text: string | null
+  voice_profile: Record<string, unknown> | null
+  created_at: string
+  updated_at: string | null
+}
+
 export interface Lead {
   id: string
   business_id: string
