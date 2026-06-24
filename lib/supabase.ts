@@ -84,6 +84,7 @@ export interface Lead {
   value: number
   notes: string
   source: string | null
+  prospect_id: string | null
   created_at: string
   last_contacted_at: string | null
 }

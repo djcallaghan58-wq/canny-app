@@ -4,7 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase-server'
 import { resolveBusinessForUser } from '@/lib/resolve-business'
-import type { Prospect, ProspectStage, ProspectStatus, ProspectSearch } from '@/lib/supabase'
+import type { Prospect, ProspectStage, ProspectStatus, ProspectSearch, LeadStage } from '@/lib/supabase'
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
@@ -149,9 +149,23 @@ export async function saveProspectFromSearch(input: {
 
 // ─── Move to leads pipeline ───────────────────────────────────────────────────
 
+export async function getProspectById(prospectId: string): Promise<Prospect | null> {
+  const { userId } = await auth()
+  if (!userId) return null
+  try {
+    const supabase = createAdminClient()
+    const { data } = await supabase
+      .from('prospects').select('*').eq('id', prospectId).maybeSingle()
+    return (data as Prospect) ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function moveToLeadsPipeline(
   prospectId: string,
   businessId: string,
+  options?: { stage?: LeadStage },
 ): Promise<{ success: boolean; leadId?: string; error?: string }> {
   const { userId } = await auth()
   if (!userId) return { success: false, error: 'Not authenticated' }
@@ -184,8 +198,9 @@ export async function moveToLeadsPipeline(
       customer_phone: prospect.phone ?? '',
       service_type:   prospect.company_overview ? prospect.company_overview.slice(0, 80) : '',
       urgency:        'Medium',
-      stage:          'New Lead',
+      stage:          options?.stage ?? 'New Lead',
       source:         'prospecting',
+      prospect_id:    prospectId,
       value:          prospect.value ?? 0,
       notes: [
         prospect.pain_points ? `Pain points: ${prospect.pain_points}` : '',
@@ -208,12 +223,14 @@ export async function moveToLeadsPipeline(
       .select('id')
       .single()
 
-    // If source column doesn't exist yet, retry without it
-    if (leadError && (leadError.code === '42703' || leadError.message?.includes('"source"'))) {
-      console.warn('[moveToLeadsPipeline] source column missing — retrying without it. Run: ALTER TABLE leads ADD COLUMN IF NOT EXISTS source text DEFAULT \'direct\';')
-      const withoutSource = { ...insertPayload }
-      delete withoutSource.source
-      const retry = await supabase.from('leads').insert(withoutSource).select('id').single()
+    // If new columns don't exist yet, retry dropping them gracefully
+    if (leadError?.code === '42703') {
+      const missing = leadError.message?.match(/"(\w+)"/) ?.[1] ?? ''
+      console.warn(`[moveToLeadsPipeline] column "${missing}" missing — retrying without it`)
+      const stripped = { ...insertPayload }
+      delete stripped.source
+      delete stripped.prospect_id
+      const retry = await supabase.from('leads').insert(stripped).select('id').single()
       lead      = retry.data
       leadError = retry.error
     }
