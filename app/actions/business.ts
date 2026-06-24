@@ -47,6 +47,40 @@ export async function getBusiness(): Promise<Business | null> {
   }
 }
 
+export async function getBusinessOrError(): Promise<{ business: Business | null; fetchError: boolean }> {
+  const { userId } = await auth()
+  if (!userId) return { business: null, fetchError: false }
+
+  try {
+    const supabase = createAdminClient()
+
+    const { data: owned, error: ownedErr } = await supabase
+      .from('businesses')
+      .select('*')
+      .eq('owner_id', userId)
+      .maybeSingle()
+
+    if (ownedErr) return { business: null, fetchError: true }
+    if (owned)    return { business: owned as Business, fetchError: false }
+
+    const clerk = await clerkClient()
+    const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 10 })
+    const orgIds = memberships.data.map((m: { organization: { id: string } }) => m.organization.id)
+    if (orgIds.length === 0) return { business: null, fetchError: false }
+
+    const { data: bizByOrg, error: orgErr } = await supabase
+      .from('businesses')
+      .select('*')
+      .in('org_id', orgIds)
+      .maybeSingle()
+
+    if (orgErr) return { business: null, fetchError: true }
+    return { business: (bizByOrg as Business) ?? null, fetchError: false }
+  } catch {
+    return { business: null, fetchError: true }
+  }
+}
+
 // Full onboarding create/update
 export async function createBusiness(input: {
   name: string
