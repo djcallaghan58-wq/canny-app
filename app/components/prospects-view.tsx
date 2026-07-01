@@ -603,6 +603,7 @@ function AISearchTab({
   const [pipelineConfirm, setPipelineConfirm] = useState<string | null>(null)
   const [emailModal,      setEmailModal]      = useState<DraftEmail | null>(null)
   const [draftCardIdx,    setDraftCardIdx]    = useState<number | null>(null)
+  const [progressVisible, setProgressVisible] = useState(false)
 
   const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
   const savedCountRef = useRef(0)
@@ -612,6 +613,16 @@ function AISearchTab({
 
   // Clear poll interval on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  // Show progress bar while searching; keep it visible for 700ms after done (fills to 100% then fades)
+  useEffect(() => {
+    if (searching) {
+      setProgressVisible(true)
+    } else {
+      const t = setTimeout(() => setProgressVisible(false), 700)
+      return () => clearTimeout(t)
+    }
+  }, [searching])
 
   // FIX 2: load recent search results fresh from Supabase on mount
   useEffect(() => {
@@ -885,6 +896,8 @@ function AISearchTab({
       <style>{`
         @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @keyframes fadeIn  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes progressFadeOut { from { opacity: 1; } to { opacity: 0; } }
         .sk { background: linear-gradient(90deg, #F0F7F4 25%, #E1F5EE 50%, #F0F7F4 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
         .batch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         @media (max-width: 860px) { .batch-grid { grid-template-columns: 1fr; } }
@@ -1069,6 +1082,37 @@ function AISearchTab({
         </div>
       )}
 
+      {/* Progress bar + status text */}
+      {progressVisible && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{
+            background: `${DS.primary}22`, borderRadius: 3, height: 3,
+            overflow: 'hidden', marginBottom: 8,
+            animation: !searching ? 'progressFadeOut 0.7s ease-out forwards' : undefined,
+          }}>
+            <div style={{
+              height: '100%', borderRadius: 3,
+              background: DS.primary,
+              width: `${searching
+                ? Math.max(5, Math.min(95, (results.length / totalExpected) * 100))
+                : 100}%`,
+              transition: 'width 0.5s ease-out',
+              boxShadow: `0 0 6px ${DS.primary}66`,
+            }} />
+          </div>
+          {searching && (
+            <p style={{ fontSize: 11.5, color: DS.secondary, fontWeight: 500 }}>
+              {results.length === 0
+                ? 'Starting research…'
+                : results.length >= totalExpected
+                ? 'Finalizing…'
+                : `Researching prospect ${results.length + 1} of ${totalExpected}…`
+              }
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Live grid: real cards first, skeletons fill remaining slots during search */}
       {(searching && results.length === 0) && (
         <div className="batch-grid">
@@ -1096,6 +1140,7 @@ function AISearchTab({
                   boxShadow:    '0 1px 3px rgba(0,0,0,0.05)',
                   opacity:      isDupe ? 0.65 : 1,
                   transition:   'border-color 0.15s, box-shadow 0.15s',
+                  animation:    'fadeIn 0.3s ease-out',
                 }}
               >
                 <div style={{ height: 3, background: isDupe ? DS.accentMid : inPipe ? '#059669' : DS.primary }} />

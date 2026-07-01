@@ -188,6 +188,13 @@ export function AgentView({
         ))}
       </div>
 
+      {/* Thin indeterminate bar while AI is thinking */}
+      {thinking && (
+        <div style={{ height: 2, background: 'rgba(29,158,117,0.12)', flexShrink: 0, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: '35%', background: DS.primary, animation: 'agentBar 1.4s ease-in-out infinite' }} />
+        </div>
+      )}
+
       {/* Messages */}
       <div style={{
         flex: 1, overflowY: 'auto', padding: '18px 24px',
@@ -330,6 +337,10 @@ export function AgentView({
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.4; }
+        }
+        @keyframes agentBar {
+          0%   { margin-left: -35%; }
+          100% { margin-left: 135%; }
         }
       `}</style>
     </div>
