@@ -1547,7 +1547,7 @@ function PipelineTab({
   business, prospects, onStageChange, onSelect,
 }: {
   business: Business; prospects: Prospect[]
-  onStageChange: (id: string, stage: ProspectStage) => void
+  onStageChange: (id: string, stage: ProspectStage, lastOutreachAt?: string | null) => void
   onSelect: (p: Prospect) => void
 }) {
   const router = useRouter()
@@ -1721,7 +1721,7 @@ function PipelineTab({
             const p = draftFor
             ;(async () => {
               const result = await markProspectOutreachSent(p.id, business.id)
-              if (result.stage) onStageChange(p.id, result.stage)
+              if (result.stage) onStageChange(p.id, result.stage, result.lastOutreachAt)
             })()
           }}
         />
@@ -1747,8 +1747,8 @@ export function ProspectsView({
 
   const addProspects  = (ps: Prospect[]) => setProspects(prev => [...ps, ...prev])
   const updateLocal   = (p: Prospect)   => setProspects(prev => prev.map(x => x.id === p.id ? p : x))
-  const changeStage   = (id: string, stage: ProspectStage) =>
-    setProspects(prev => prev.map(p => p.id === id ? { ...p, stage } : p))
+  const changeStage   = (id: string, stage: ProspectStage, lastOutreachAt?: string | null) =>
+    setProspects(prev => prev.map(p => p.id === id ? { ...p, stage, ...(lastOutreachAt !== undefined ? { last_outreach_at: lastOutreachAt } : {}) } : p))
 
   const TABS: { id: Tab; label: string; icon: typeof Search }[] = [
     { id: 'search',   label: 'Prospecting', icon: Search    },

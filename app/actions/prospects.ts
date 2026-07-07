@@ -362,7 +362,7 @@ export async function updateProspect(
 export async function markProspectOutreachSent(
   id: string,
   businessId: string,
-): Promise<{ success: boolean; stage?: ProspectStage; error?: string }> {
+): Promise<{ success: boolean; stage?: ProspectStage; lastOutreachAt?: string; error?: string }> {
   const { userId } = await auth()
   if (!userId) return { success: false, error: 'Not authenticated' }
   try {
@@ -378,16 +378,17 @@ export async function markProspectOutreachSent(
       .maybeSingle()
 
     const nextStage: ProspectStage = current?.stage === 'New' ? 'Contacted' : (current?.stage as ProspectStage) ?? 'Contacted'
+    const now = new Date().toISOString()
 
     const { error } = await supabase
       .from('prospects')
-      .update({ stage: nextStage, last_outreach_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ stage: nextStage, last_outreach_at: now, updated_at: now })
       .eq('id', id)
       .eq('business_id', businessId)
 
     if (error) return { success: false, error: error.message }
     revalidatePath('/dashboard/prospects')
-    return { success: true, stage: nextStage }
+    return { success: true, stage: nextStage, lastOutreachAt: now }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
   }
