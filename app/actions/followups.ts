@@ -108,7 +108,8 @@ export async function getFollowupData(businessId: string): Promise<FollowupData>
       const elapsed     = now - new Date(lastTouch).getTime()
       const elapsedDays = Math.floor(elapsed / DAY_MS)
 
-      if (p.stage === 'Closed') {
+      if (p.stage === 'Closed Won') {
+        // Former customer - eligible for a reactivation nudge after a long gap.
         if (elapsed >= reactMs) {
           reactivations.push({
             id: p.id, type: 'prospect',
@@ -119,6 +120,8 @@ export async function getFollowupData(businessId: string): Promise<FollowupData>
             email: p.email || null,
           })
         }
+      } else if (p.stage === 'Closed Lost') {
+        // Deal's dead - don't keep nagging a lost prospect.
       } else if (p.stage !== 'New') {
         // Only follow-up on prospects that have been contacted at some point
         if (p.last_outreach_at) {

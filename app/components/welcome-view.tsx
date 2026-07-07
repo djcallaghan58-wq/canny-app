@@ -42,11 +42,12 @@ function timeAgo(dateStr: string): string {
 
 const STAGE_COLORS: Record<string, string> = {
   'New':         DS.muted,
-  'Researched':  '#0891B2',
   'Contacted':   '#F59E0B',
-  'Responded':   '#7C3AED',
+  'Replied':     '#7C3AED',
   'Meeting Set': DS.primary,
-  'Closed':      '#16A34A',
+  'Proposal':    '#0891B2',
+  'Closed Won':  '#16A34A',
+  'Closed Lost': '#DC2626',
 }
 
 // ── Welcome view ──────────────────────────────────────────────────────────────

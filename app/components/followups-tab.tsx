@@ -56,7 +56,7 @@ function FollowupCard({
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           item,
-          business: { name: business.name, industry: business.industry, main_service: business.main_service, business_description: business.business_description },
+          business: { id: business.id, name: business.name, industry: business.industry, main_service: business.main_service, business_description: business.business_description },
           isReactivation: false,
           followUpNumber: item.follow_up_number,
         }),
@@ -178,7 +178,7 @@ function ReactivationCard({
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           item,
-          business: { name: business.name, industry: business.industry, main_service: business.main_service, business_description: business.business_description },
+          business: { id: business.id, name: business.name, industry: business.industry, main_service: business.main_service, business_description: business.business_description },
           isReactivation: true,
         }),
       })

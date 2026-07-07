@@ -23,7 +23,14 @@ export type LeadStage =
   | 'Scheduled'
   | 'Complete'
 
-export type ProspectStage = 'New' | 'Researched' | 'Contacted' | 'Responded' | 'Meeting Set' | 'Closed'
+export type ProspectStage =
+  | 'New'           // found/researched, not yet contacted
+  | 'Contacted'     // outreach sent, no reply yet
+  | 'Replied'       // they responded
+  | 'Meeting Set'   // call/meeting booked
+  | 'Proposal'      // quote/proposal sent
+  | 'Closed Won'    // became a customer
+  | 'Closed Lost'   // deal is dead
 
 export interface CatalogItem {
   name: string

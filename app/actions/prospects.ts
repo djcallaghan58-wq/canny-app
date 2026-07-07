@@ -125,7 +125,7 @@ export async function saveProspectFromSearch(input: {
       .insert({
         ...input,
         company_name: input.company_name.trim(),
-        stage:    'Researched',
+        stage:    'New',
         status:   'new',
         enriched: true,
         source:   input.source ?? 'ai_search',
@@ -346,6 +346,48 @@ export async function updateProspect(
     if (error) return { success: false, error: error.message }
     revalidatePath('/dashboard/prospects')
     return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
+  }
+}
+
+// ─── Auto-contacted tracking ──────────────────────────────────────────────────
+// Call this whenever an outreach email is actually opened/sent for a prospect
+// (not on a separate manual "mark contacted" click - that step gets skipped
+// and status drifts). Advances New -> Contacted automatically, and always
+// bumps last_outreach_at so follow-up scheduling and staleness badges stay
+// accurate. Never downgrades a prospect that's already moved further along
+// (Replied, Meeting Set, Proposal, Closed Won/Lost) back to Contacted.
+
+export async function markProspectOutreachSent(
+  id: string,
+  businessId: string,
+): Promise<{ success: boolean; stage?: ProspectStage; error?: string }> {
+  const { userId } = await auth()
+  if (!userId) return { success: false, error: 'Not authenticated' }
+  try {
+    const supabase = createAdminClient()
+    const biz = await resolveBusinessForUser(userId)
+    if (!biz || biz.id !== businessId) return { success: false, error: 'Business not found' }
+
+    const { data: current } = await supabase
+      .from('prospects')
+      .select('stage')
+      .eq('id', id)
+      .eq('business_id', businessId)
+      .maybeSingle()
+
+    const nextStage: ProspectStage = current?.stage === 'New' ? 'Contacted' : (current?.stage as ProspectStage) ?? 'Contacted'
+
+    const { error } = await supabase
+      .from('prospects')
+      .update({ stage: nextStage, last_outreach_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('business_id', businessId)
+
+    if (error) return { success: false, error: error.message }
+    revalidatePath('/dashboard/prospects')
+    return { success: true, stage: nextStage }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
   }

@@ -6,6 +6,8 @@ import { scrapeCompanyContact } from '@/lib/research-scraper'
 import { callAnthropic } from '@/lib/anthropic'
 import { parseDraft } from '@/lib/parse-draft'
 import { stripDashesFromObject } from '@/lib/strip-dashes'
+import { frameworkRules, getActiveWritingStyle, voiceBlock } from '@/lib/email-framework'
+import type { WritingStyleRow } from '@/lib/supabase'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -41,6 +43,8 @@ export interface BatchResult {
 }
 
 // ── Copywriter rules (shared) ─────────────────────────────────────────────────
+// Research rules (used by the researcher agent, not the copywriter - it still
+// wants short, plain, no-jargon output for pain_points/pitch_angle fields).
 
 const WRITING_RULES = [
   `Writing rules: short sentences. No em dashes or en dashes (— –).`,
@@ -64,21 +68,17 @@ function buildEmailPrompt(
     `Write a cold outreach email to ${contactName ? `${contactName} at ` : ''}${companyName}.`,
     ``,
     `Context:`,
-    `- Their pain point: ${painPoints}`,
-    `- Pitch angle: ${pitchAngle}`,
+    `- Their likely pain point: ${painPoints}`,
+    `- Pitch angle to work from: ${pitchAngle}`,
     business.main_service    ? `- Our service: ${business.main_service}` : '',
     catalogText              ? `- What we sell: ${catalogText}`          : '',
     business.business_description ? `- About us: ${business.business_description}` : '',
     business.service_area    ? `- We serve: ${business.service_area}`   : '',
     ``,
-    `Rules:`,
-    `- Subject: under 8 words, no punctuation, no dashes`,
-    `- Body: 3-4 sentences max, one specific pain point, one specific pitch, one clear CTA`,
-    `- Sound like a real person, not a marketing bot`,
-    `- Blank line between paragraphs`,
+    `Follow the structure and hard rules from your instructions exactly.`,
     ``,
     `Return EXACTLY this format (no other text):`,
-    `SUBJECT A: [subject line]`,
+    `SUBJECT A: [subject line, under 8 words, no punctuation, no dashes]`,
     `SUBJECT B: [alternative subject line]`,
     ``,
     `[email body]`,
@@ -214,6 +214,7 @@ async function generateEmailCopy(
   pitchAngle:   string,
   business:     Business,
   businessId:   string,
+  style:        WritingStyleRow | null,
 ): Promise<{ subject: string; subjectB?: string; body: string }> {
   const fallback = { subject: `Quick question for ${companyName}`, body: pitchAngle }
   try {
@@ -221,9 +222,10 @@ async function generateEmailCopy(
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 512,
       system: [
-        `You are a B2B copywriter for ${business.name}.`,
+        `You are a B2B cold email copywriter for ${business.name}.`,
         business.business_description ? ` ${business.business_description}.` : '',
-        ` ${WRITING_RULES}`,
+        `\n\n${frameworkRules('first_touch')}`,
+        voiceBlock(style),
       ].join(''),
       messages: [{
         role:    'user',
@@ -249,6 +251,7 @@ async function researchOneProspect(
   target:     string,
   business:   Business,
   businessId: string,
+  style:      WritingStyleRow | null,
 ): Promise<BatchResult | null> {
   // Run researcher + scraper in parallel
   const [data, scraped] = await Promise.all([
@@ -274,6 +277,7 @@ async function researchOneProspect(
     data.pitch_angle,
     business,
     businessId,
+    style,
   )
 
   const result: BatchResult = {
@@ -313,7 +317,10 @@ export async function POST(req: Request) {
   after(async () => {
     const db = createAdminClient()
     try {
-      const targets = await generateTargets(query, business, existingCompanies, businessId)
+      const [targets, style] = await Promise.all([
+        generateTargets(query, business, existingCompanies, businessId),
+        getActiveWritingStyle(businessId),
+      ])
       await db.from('agent_runs').update({ total_tasks: targets.length }).eq('id', runId)
 
       const taskRows = targets.map(org => ({
@@ -325,7 +332,7 @@ export async function POST(req: Request) {
       let doneCount = 0
       await Promise.all(taskRows.map(async task => {
         await db.from('agent_tasks').update({ status: 'running' }).eq('id', task.id)
-        const result = await researchOneProspect(task.org_name, business, businessId)
+        const result = await researchOneProspect(task.org_name, business, businessId, style)
 
         if (result) {
           await db.from('agent_tasks').update({ status: 'completed', result }).eq('id', task.id)

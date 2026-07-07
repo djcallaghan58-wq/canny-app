@@ -10,8 +10,8 @@ import {
 import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/supabase'
 import {
   createProspect, updateProspectStage, updateProspect, importProspects,
-  saveProspectFromSearch, checkRecentSearch, saveSearch, moveToLeadsPipeline,
-  getProspects,
+  saveProspectFromSearch, checkRecentSearch, saveSearch,
+  markProspectOutreachSent, getProspects,
 } from '@/app/actions/prospects'
 import { saveEmailAsStyle } from '@/app/actions/writing-styles'
 
@@ -51,15 +51,16 @@ interface CsvRow {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const STAGES: ProspectStage[] = ['New', 'Researched', 'Contacted', 'Responded', 'Meeting Set', 'Closed']
+const STAGES: ProspectStage[] = ['New', 'Contacted', 'Replied', 'Meeting Set', 'Proposal', 'Closed Won', 'Closed Lost']
 
 const STAGE_STYLE: Record<ProspectStage, { color: string; bg: string }> = {
-  'New':         { color: DS.secondary, bg: DS.accentMid    },
-  'Researched':  { color: '#0891B2',    bg: 'rgba(8,145,178,0.10)'   },
-  'Contacted':   { color: '#F59E0B',    bg: 'rgba(245,158,11,0.10)'  },
-  'Responded':   { color: '#7C3AED',    bg: 'rgba(124,58,237,0.10)'  },
-  'Meeting Set': { color: DS.primary,   bg: DS.accentLight  },
-  'Closed':      { color: '#16A34A',    bg: 'rgba(22,163,74,0.12)'   },
+  'New':          { color: DS.secondary, bg: DS.accentMid   },
+  'Contacted':    { color: '#F59E0B',    bg: 'rgba(245,158,11,0.10)'  },
+  'Replied':      { color: '#7C3AED',    bg: 'rgba(124,58,237,0.10)'  },
+  'Meeting Set':  { color: DS.primary,   bg: DS.accentLight },
+  'Proposal':     { color: '#0891B2',    bg: 'rgba(8,145,178,0.10)'   },
+  'Closed Won':   { color: '#16A34A',    bg: 'rgba(22,163,74,0.12)'   },
+  'Closed Lost':  { color: '#DC2626',    bg: 'rgba(220,38,38,0.10)'   },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -317,8 +318,18 @@ function ProspectDetail({
   const [stage,        setStage]        = useState<ProspectStage>(prospect.stage)
   const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
   const [draftLoading, setDraftLoading] = useState(false)
+  const [value,        setValue]        = useState(prospect.value ?? 0)
+  const [savingValue,  setSavingValue]  = useState(false)
+  const [lastOutreach, setLastOutreach] = useState(prospect.last_outreach_at)
 
   const stageSt = STAGE_STYLE[stage]
+
+  const saveValue = async () => {
+    setSavingValue(true)
+    await updateProspect(prospect.id, { value })
+    onUpdate({ ...prospect, notes, stage, value })
+    setSavingValue(false)
+  }
 
   const saveNotes = async () => {
     setSavingNotes(true)
@@ -436,6 +447,30 @@ function ProspectDetail({
             </div>
           </div>
 
+          <div style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
+            <div style={{ flex: 1 }}>
+              <p style={lbl}>Deal Value {savingValue && <Loader2 size={9} style={{ animation: 'spin 1s linear infinite', display: 'inline', marginLeft: 4 }} />}</p>
+              <input
+                type="number"
+                value={value}
+                onChange={e => setValue(Number(e.target.value))}
+                onBlur={saveValue}
+                placeholder="0"
+                style={{
+                  width: '100%', padding: '6px 10px', borderRadius: 7,
+                  border: `1.5px solid ${DS.outlineBorder}`, background: DS.inputBg,
+                  fontSize: 13, color: DS.bodyText, fontFamily: 'inherit', outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={lbl}>Last Contacted</p>
+              <p style={{ fontSize: 13, color: lastOutreach ? DS.bodyText : DS.muted, padding: '6px 0' }}>
+                {lastOutreach ? new Date(lastOutreach).toLocaleDateString() : 'Not yet contacted'}
+              </p>
+            </div>
+          </div>
+
           {(prospect.email || prospect.phone) && (
             <div style={{ background: DS.accentMid, borderRadius: 9, padding: '11px 13px', marginBottom: 18 }}>
               <p style={lbl}>Contact Info</p>
@@ -547,7 +582,24 @@ function ProspectDetail({
         </div>
       </div>
 
-      {draftEmail && <EmailModal email={draftEmail} onClose={() => setDraftEmail(null)} businessId={business.id} />}
+      {draftEmail && (
+        <EmailModal
+          email={draftEmail}
+          businessId={business.id}
+          onClose={() => setDraftEmail(null)}
+          onOpen={() => {
+            (async () => {
+              const result = await markProspectOutreachSent(prospect.id, business.id)
+              const now = new Date().toISOString()
+              setLastOutreach(now)
+              if (result.stage) {
+                setStage(result.stage)
+                onUpdate({ ...prospect, notes, stage: result.stage, value, last_outreach_at: now })
+              }
+            })()
+          }}
+        />
+      )}
     </>
   )
 }
@@ -855,21 +907,12 @@ function AISearchTab({
           }
         }
 
-        // Step 2: create lead in leads table
-        console.log('[Pipeline] moveToLeadsPipeline →', { prospectId, businessId: business.id })
-        try {
-          const pipelineResult = await moveToLeadsPipeline(prospectId, business.id)
-          console.log('[Pipeline] moveToLeadsPipeline result →', pipelineResult)
-          if (pipelineResult.success) {
-            setInPipelineIdx(prev => new Set([...prev, i]))
-            setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
-            successCount++
-          } else {
-            showError(`Pipeline add failed for ${r.company_name}: ${pipelineResult.error ?? 'unknown error'}`)
-          }
-        } catch (e) {
-          showError(`Pipeline error for ${r.company_name}: ${e instanceof Error ? e.message : String(e)}`)
-        }
+        // Saved as a Prospect at stage "New" - this IS the sales pipeline now.
+        // (Previously this also force-created a "Lead" in the job-board table,
+        // which threw away the New/Contacted/Replied stage info - removed.)
+        setInPipelineIdx(prev => new Set([...prev, i]))
+        setAddingIdx(prev => { const s = new Set(prev); s.delete(i); return s })
+        successCount++
       }
     } finally {
       setSelectedIdx(new Set())
@@ -1295,10 +1338,10 @@ function AISearchTab({
                 }
               }
               if (!prospectId) return
-              const result = await moveToLeadsPipeline(prospectId, business.id)
+              const result = await markProspectOutreachSent(prospectId, business.id)
               if (result.success) {
                 setInPipelineIdx(prev => new Set([...prev, idx]))
-                setPipelineConfirm('Lead added to pipeline as Contacted')
+                setPipelineConfirm('Marked as Contacted in your pipeline')
                 setTimeout(() => setPipelineConfirm(null), 3500)
               }
             })()
@@ -1509,13 +1552,23 @@ function PipelineTab({
 }) {
   const router = useRouter()
 
+  // "Closed Won" is the end of the normal forward flow - "Closed Lost" is a
+  // branch you opt into explicitly (via markLost), not something you nudge
+  // into with the forward arrow.
+  const FORWARD_LIMIT = STAGES.indexOf('Closed Won')
+
   const move = async (p: Prospect, dir: 'back' | 'forward') => {
     const idx  = STAGES.indexOf(p.stage)
     const next = dir === 'forward' ? idx + 1 : idx - 1
-    if (next < 0 || next >= STAGES.length) return
+    if (next < 0 || next > FORWARD_LIMIT) return
     const newStage = STAGES[next]
     onStageChange(p.id, newStage)
     await updateProspectStage(p.id, newStage)
+  }
+
+  const markLost = async (p: Prospect) => {
+    onStageChange(p.id, 'Closed Lost')
+    await updateProspectStage(p.id, 'Closed Lost')
   }
 
   const openCoach = (p: Prospect) => {
@@ -1560,6 +1613,29 @@ function PipelineTab({
           @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         `}</style>
 
+        {/* Summary bar */}
+        {prospects.length > 0 && (() => {
+          const openStages: ProspectStage[] = STAGES.filter(s => s !== 'Closed Won' && s !== 'Closed Lost')
+          const openCount    = prospects.filter(p => openStages.includes(p.stage)).length
+          const openValue    = prospects.filter(p => openStages.includes(p.stage)).reduce((sum, p) => sum + (p.value || 0), 0)
+          const wonCount     = prospects.filter(p => p.stage === 'Closed Won').length
+          const wonValue     = prospects.filter(p => p.stage === 'Closed Won').reduce((sum, p) => sum + (p.value || 0), 0)
+          const contactedPct = prospects.length ? Math.round((prospects.filter(p => p.stage !== 'New').length / prospects.length) * 100) : 0
+          const stat = (label: string, value: string) => (
+            <div>
+              <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>{label}</p>
+              <p style={{ fontSize: 16, fontWeight: 700, color: DS.bodyText }}>{value}</p>
+            </div>
+          )
+          return (
+            <div style={{ display: 'flex', gap: 24, background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, padding: '12px 18px', marginBottom: 14 }}>
+              {stat('Open pipeline', `${openCount} · $${openValue.toLocaleString()}`)}
+              {stat('Closed won', `${wonCount} · $${wonValue.toLocaleString()}`)}
+              {stat('Contacted', `${contactedPct}%`)}
+            </div>
+          )
+        })()}
+
         {STAGES.map(stage => {
           const stageProspects = prospects.filter(p => p.stage === stage)
           const st = STAGE_STYLE[stage]
@@ -1601,7 +1677,7 @@ function PipelineTab({
                               <button onClick={() => move(p, 'back')} disabled={stageIdx === 0} style={{ ...arrBtn, color: stageIdx === 0 ? DS.muted : DS.secondary, cursor: stageIdx === 0 ? 'not-allowed' : 'pointer' }} aria-label="Move back">
                                 <ChevronLeft size={11} />
                               </button>
-                              <button onClick={() => move(p, 'forward')} disabled={stageIdx === STAGES.length - 1} style={{ ...arrBtn, color: stageIdx === STAGES.length - 1 ? DS.muted : DS.secondary, cursor: stageIdx === STAGES.length - 1 ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
+                              <button onClick={() => move(p, 'forward')} disabled={stageIdx >= FORWARD_LIMIT} style={{ ...arrBtn, color: stageIdx >= FORWARD_LIMIT ? DS.muted : DS.secondary, cursor: stageIdx >= FORWARD_LIMIT ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
                                 <ChevronRight size={11} />
                               </button>
                             </div>
@@ -1614,6 +1690,11 @@ function PipelineTab({
                               <button onClick={() => openCoach(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
                                 <Bot size={9} /> Coach
                               </button>
+                              {stageIdx < FORWARD_LIMIT && (
+                                <button onClick={() => markLost(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600, color: '#DC2626' }}>
+                                  Lost
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1630,7 +1711,21 @@ function PipelineTab({
           )
         })}
       </div>
-      {draftEmail && <EmailModal email={draftEmail} onClose={() => { setDraftEmail(null); setDraftFor(null) }} businessId={business.id} />}
+      {draftEmail && (
+        <EmailModal
+          email={draftEmail}
+          businessId={business.id}
+          onClose={() => { setDraftEmail(null); setDraftFor(null) }}
+          onOpen={() => {
+            if (!draftFor) return
+            const p = draftFor
+            ;(async () => {
+              const result = await markProspectOutreachSent(p.id, business.id)
+              if (result.stage) onStageChange(p.id, result.stage)
+            })()
+          }}
+        />
+      )}
     </>
   )
 }
@@ -1658,7 +1753,7 @@ export function ProspectsView({
   const TABS: { id: Tab; label: string; icon: typeof Search }[] = [
     { id: 'search',   label: 'Prospecting', icon: Search    },
     { id: 'lists',    label: 'My Lists',  icon: Upload    },
-    { id: 'pipeline', label: 'Pipeline',  icon: GitBranch },
+    { id: 'pipeline', label: 'Sales Pipeline', icon: GitBranch },
   ]
 
   return (

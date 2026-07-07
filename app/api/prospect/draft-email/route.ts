@@ -1,6 +1,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { callAnthropic } from '@/lib/anthropic'
 import { parseDraft } from '@/lib/parse-draft'
+import { frameworkRules, getActiveWritingStyle, voiceBlock } from '@/lib/email-framework'
 
 export async function POST(req: Request) {
   const { userId } = await auth()
@@ -13,14 +14,22 @@ export async function POST(req: Request) {
     .map((c: { name: string; price: number; unit: string }) => `${c.name} ($${c.price} ${c.unit})`)
     .join(', ')
 
+  const style = await getActiveWritingStyle(business.id)
+
+  // A prospect that's already been contacted (Contacted/Replied/Meeting Set/
+  // Proposal) is getting a follow-up, not a cold open - use the follow-up
+  // angle rules so the app doesn't just resend the same pitch.
+  const stage = prospect.stage && prospect.stage !== 'New'
+    ? 'follow_up' as const
+    : 'first_touch' as const
+
   const system = [
     `You write cold outreach emails for ${business.name}${business.industry ? `, a ${business.industry} company` : ''}.`,
     business.business_description       ? ` ${business.business_description}.`                           : '',
     catalogText                         ? ` What we sell: ${catalogText}.`                               : '',
     business.service_area               ? ` We serve: ${business.service_area}.`                        : '',
-    ` Rules: short sentences, no em dashes or en dashes, no "leverage" "streamline" "seamlessly"`,
-    ` "game-changer" "in today's world" "tailored" "cutting-edge" "robust".`,
-    ` Write like a real person, direct and confident.`,
+    `\n\n${frameworkRules(stage)}`,
+    voiceBlock(style),
   ].join('')
 
   const contactLine = prospect.contact_name
@@ -28,22 +37,19 @@ export async function POST(req: Request) {
     : prospect.company_name
 
   const prompt = [
-    `Write a cold outreach email to ${contactLine}.`,
+    stage === 'follow_up' ? `Write a follow-up email to ${contactLine}.` : `Write a cold outreach email to ${contactLine}.`,
     ``,
     `Context:`,
-    prospect.pain_points    ? `- Their pain point: ${prospect.pain_points}`        : '',
-    prospect.pitch_angle    ? `- Pitch angle: ${prospect.pitch_angle}`             : '',
-    prospect.talking_points ? `- Talking points: ${prospect.talking_points}`       : '',
-    business.main_service   ? `- Our main service: ${business.main_service}`       : '',
+    prospect.pain_points     ? `- Their pain point: ${prospect.pain_points}`               : '',
+    prospect.pitch_angle     ? `- Pitch angle: ${prospect.pitch_angle}`                    : '',
+    prospect.talking_points  ? `- Talking points: ${prospect.talking_points}`              : '',
+    prospect.company_overview ? `- What we know about them: ${prospect.company_overview}` : '',
+    business.main_service    ? `- Our main service: ${business.main_service}`              : '',
     ``,
-    `Rules:`,
-    `- Subject: under 8 words, no punctuation, no dashes`,
-    `- Body: 3-4 sentences max, one pain point, one pitch, one clear ask`,
-    `- Blank line between paragraphs`,
-    `- End with one question or call to action`,
+    `Follow the structure and hard rules from your instructions exactly.`,
     ``,
     `Return EXACTLY this format:`,
-    `SUBJECT A: [subject line]`,
+    `SUBJECT A: [subject line, under 8 words, no punctuation, no dashes]`,
     `SUBJECT B: [alternative subject line]`,
     ``,
     `[email body]`,
