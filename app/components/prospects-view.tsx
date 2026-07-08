@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { stripDashes } from '@/lib/strip-dashes'
 import { useRouter } from 'next/navigation'
 import {
-  Search, Upload, GitBranch, X, ChevronLeft, ChevronRight,
+  Search, Upload, Send, X,
   Bot, Mail, Plus, Loader2, Copy, Check,
 } from 'lucide-react'
 import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/supabase'
@@ -42,7 +42,7 @@ interface BatchResult {
   pain_points: string; pitch_angle: string; email_subject: string; email_body: string
 }
 
-interface DraftEmail { subject: string; subjectB?: string; body: string; email?: string }
+export interface DraftEmail { subject: string; subjectB?: string; body: string; email?: string }
 
 interface CsvRow {
   company_name: string; contact_name: string; contact_title: string
@@ -51,9 +51,11 @@ interface CsvRow {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const STAGES: ProspectStage[] = ['New', 'Contacted', 'Replied', 'Meeting Set', 'Proposal', 'Closed Won', 'Closed Lost']
+export const STAGES: ProspectStage[] = ['New', 'Contacted', 'Replied', 'Meeting Set', 'Proposal', 'Closed Won', 'Closed Lost']
+export const PIPELINE_STAGES: ProspectStage[] = ['Replied', 'Meeting Set', 'Proposal', 'Closed Won', 'Closed Lost']
+export const OUTREACH_STAGES: ProspectStage[] = ['New', 'Contacted']
 
-const STAGE_STYLE: Record<ProspectStage, { color: string; bg: string }> = {
+export const STAGE_STYLE: Record<ProspectStage, { color: string; bg: string }> = {
   'New':          { color: DS.secondary, bg: DS.accentMid   },
   'Contacted':    { color: '#F59E0B',    bg: 'rgba(245,158,11,0.10)'  },
   'Replied':      { color: '#7C3AED',    bg: 'rgba(124,58,237,0.10)'  },
@@ -121,10 +123,10 @@ function getInitials(name: string): string {
 
 // ── Draft Email Modal ─────────────────────────────────────────────────────────
 
-function EmailModal({ email, onClose, onOpen, businessId }: {
+export function EmailModal({ email, onClose, onOpen, businessId }: {
   email:       DraftEmail
   onClose:     () => void
-  onOpen?:     () => void   // fires after Gmail window opens (PATH 1: auto-create pipeline lead)
+  onOpen?:     () => void   // fires after Gmail window opens (marks prospect Contacted)
   businessId?: string
 }) {
   const [subject,    setSubject]    = useState(email.subject)
@@ -305,7 +307,7 @@ function EmailModal({ email, onClose, onOpen, businessId }: {
 
 // ── Prospect Detail Slide-Over ────────────────────────────────────────────────
 
-function ProspectDetail({
+export function ProspectDetail({
   prospect, business, onClose, onUpdate,
 }: {
   prospect: Prospect; business: Business; onClose: () => void; onUpdate: (p: Prospect) => void
@@ -1057,7 +1059,7 @@ function AISearchTab({
             )}
             {inPipelineCount > 0 && (
               <span style={{ fontSize: 11.5, fontWeight: 600, color: DS.primary, background: DS.accentLight, border: `1px solid ${DS.cardBorder}`, padding: '3px 10px', borderRadius: 20 }}>
-                {inPipelineCount} in pipeline
+                {inPipelineCount} saved to outreach
               </span>
             )}
             {selectedIdx.size > 0 && (
@@ -1102,8 +1104,8 @@ function AISearchTab({
                 : addedConfirm
                 ? <><Check size={12} /> Added!</>
                 : inPipelineCount >= nonDuplicateCount
-                ? '✓ All in Pipeline'
-                : <><Plus size={12} /> Save All to Pipeline</>
+                ? '✓ All Saved'
+                : <><Plus size={12} /> Save All to Outreach</>
               }
             </button>
           </div>
@@ -1227,7 +1229,7 @@ function AISearchTab({
                     {isDupe ? (
                       <span style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, background: DS.pageBg, padding: '2px 7px', borderRadius: 20, flexShrink: 0 }}>Saved</span>
                     ) : inPipe ? (
-                      <span style={{ fontSize: 9.5, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.10)', padding: '2px 7px', borderRadius: 20, flexShrink: 0 }}>✓ Pipeline</span>
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.10)', padding: '2px 7px', borderRadius: 20, flexShrink: 0 }}>✓ Saved</span>
                     ) : null}
                   </div>
 
@@ -1286,9 +1288,9 @@ function AISearchTab({
                           boxShadow: !inPipe && !isAdding && saved ? `0 1px 6px ${DS.primaryGlow}` : 'none',
                         }}
                       >
-                        {inPipe ? <><Check size={10} /> Pipeline</>
+                        {inPipe ? <><Check size={10} /> Saved</>
                           : isAdding || !saved ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
-                            : <><Plus size={10} /> Pipeline</>
+                            : <><Plus size={10} /> Save</>
                         }
                       </button>
                     )}
@@ -1341,7 +1343,7 @@ function AISearchTab({
               const result = await markProspectOutreachSent(prospectId, business.id)
               if (result.success) {
                 setInPipelineIdx(prev => new Set([...prev, idx]))
-                setPipelineConfirm('Marked as Contacted in your pipeline')
+                setPipelineConfirm('Saved and marked as Contacted in Outreach')
                 setTimeout(() => setPipelineConfirm(null), 3500)
               }
             })()
@@ -1541,9 +1543,13 @@ function MyListsTab({
   )
 }
 
-// ── Pipeline Tab ──────────────────────────────────────────────────────────────
+// ── Outreach Tab ───────────────────────────────────────────────────────────────
+// Volume, not deals: everyone who's been found or contacted but hasn't
+// replied yet. No Kanban - just a list. The moment someone actually replies,
+// "Mark Replied" promotes them into the real Pipeline (see
+// sales-pipeline-view.tsx) and they drop off this list.
 
-function PipelineTab({
+function OutreachTab({
   business, prospects, onStageChange, onSelect,
 }: {
   business: Business; prospects: Prospect[]
@@ -1551,19 +1557,29 @@ function PipelineTab({
   onSelect: (p: Prospect) => void
 }) {
   const router = useRouter()
+  const outreachProspects = prospects.filter(p => OUTREACH_STAGES.includes(p.stage))
 
-  // "Closed Won" is the end of the normal forward flow - "Closed Lost" is a
-  // branch you opt into explicitly (via markLost), not something you nudge
-  // into with the forward arrow.
-  const FORWARD_LIMIT = STAGES.indexOf('Closed Won')
+  const [draftFor,     setDraftFor]     = useState<Prospect | null>(null)
+  const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
+  const [draftLoading, setDraftLoading] = useState(false)
+  const [replyingId,   setReplyingId]   = useState<string | null>(null)
 
-  const move = async (p: Prospect, dir: 'back' | 'forward') => {
-    const idx  = STAGES.indexOf(p.stage)
-    const next = dir === 'forward' ? idx + 1 : idx - 1
-    if (next < 0 || next > FORWARD_LIMIT) return
-    const newStage = STAGES[next]
-    onStageChange(p.id, newStage)
-    await updateProspectStage(p.id, newStage)
+  const draftEmailFor = async (p: Prospect) => {
+    setDraftFor(p); setDraftLoading(true)
+    const res = await fetch('/api/prospect/draft-email', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect: p, business }),
+    })
+    const data = await res.json()
+    if (data.subject) setDraftEmail({ ...data, email: p.email || p.email_format || '' })
+    setDraftLoading(false)
+  }
+
+  const markReplied = async (p: Prospect) => {
+    setReplyingId(p.id)
+    onStageChange(p.id, 'Replied')
+    await updateProspectStage(p.id, 'Replied')
+    setReplyingId(null)
   }
 
   const markLost = async (p: Prospect) => {
@@ -1584,132 +1600,67 @@ function PipelineTab({
     router.push(`/dashboard/agent?prompt=${encodeURIComponent(prompt)}`)
   }
 
-  const [draftFor,     setDraftFor]     = useState<Prospect | null>(null)
-  const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
-  const [draftLoading, setDraftLoading] = useState(false)
-
-  const draftEmailFor = async (p: Prospect) => {
-    setDraftFor(p); setDraftLoading(true)
-    const res = await fetch('/api/prospect/draft-email', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prospect: p, business }),
-    })
-    const data = await res.json()
-    if (data.subject) setDraftEmail({ ...data, email: p.email || p.email_format || '' })
-    setDraftLoading(false)
-  }
-
-  const arrBtn: React.CSSProperties = {
-    width: 24, height: 24, borderRadius: 5, border: `1px solid ${DS.cardBorder}`,
-    background: DS.inputBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    cursor: 'pointer', color: DS.secondary, flexShrink: 0, transition: 'all 0.15s',
+  const btn: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px',
+    borderRadius: 6, border: `1px solid ${DS.cardBorder}`, background: DS.inputBg,
+    cursor: 'pointer', color: DS.secondary, fontSize: 11, fontWeight: 600,
+    fontFamily: 'inherit', whiteSpace: 'nowrap', transition: 'all 0.15s',
   }
 
   return (
     <>
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px 32px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
-        <style>{`
-          .prospect-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
-          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        `}</style>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-        {/* Summary bar */}
-        {prospects.length > 0 && (() => {
-          const openStages: ProspectStage[] = STAGES.filter(s => s !== 'Closed Won' && s !== 'Closed Lost')
-          const openCount    = prospects.filter(p => openStages.includes(p.stage)).length
-          const openValue    = prospects.filter(p => openStages.includes(p.stage)).reduce((sum, p) => sum + (p.value || 0), 0)
-          const wonCount     = prospects.filter(p => p.stage === 'Closed Won').length
-          const wonValue     = prospects.filter(p => p.stage === 'Closed Won').reduce((sum, p) => sum + (p.value || 0), 0)
-          const contactedPct = prospects.length ? Math.round((prospects.filter(p => p.stage !== 'New').length / prospects.length) * 100) : 0
-          const stat = (label: string, value: string) => (
-            <div>
-              <p style={{ fontSize: 9.5, fontWeight: 700, color: DS.muted, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 2 }}>{label}</p>
-              <p style={{ fontSize: 16, fontWeight: 700, color: DS.bodyText }}>{value}</p>
-            </div>
-          )
-          return (
-            <div style={{ display: 'flex', gap: 24, background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, padding: '12px 18px', marginBottom: 14 }}>
-              {stat('Open pipeline', `${openCount} · $${openValue.toLocaleString()}`)}
-              {stat('Closed won', `${wonCount} · $${wonValue.toLocaleString()}`)}
-              {stat('Contacted', `${contactedPct}%`)}
-            </div>
-          )
-        })()}
-
-        {STAGES.map(stage => {
-          const stageProspects = prospects.filter(p => p.stage === stage)
-          const st = STAGE_STYLE[stage]
-          return (
-            <div key={stage} style={{ marginBottom: 5 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 0' }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: st.color, letterSpacing: '0.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{stage}</span>
-                <div style={{ flex: 1, height: 1, background: DS.cardBorder }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, border: `1px solid ${DS.cardBorder}`, padding: '1px 8px', borderRadius: 20 }}>
-                  {stageProspects.length}
-                </span>
-              </div>
-
-              {stageProspects.length > 0 ? (
-                <div className="prospect-grid" style={{ marginBottom: 4 }}>
-                  {stageProspects.map(p => {
-                    const stageIdx = STAGES.indexOf(p.stage)
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={() => onSelect(p)}
-                        style={{ background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, overflow: 'hidden', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s' }}
-                        onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = DS.cardHover; el.style.boxShadow = '0 3px 10px rgba(29,158,117,0.10)'; el.style.transform = 'translateY(-1px)' }}
-                        onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = DS.cardBorder; el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)'; el.style.transform = 'none' }}
-                      >
-                        <div style={{ height: 3, background: st.color, opacity: 0.6 }} />
-                        <div style={{ padding: '11px 12px' }}>
-                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 3 }}>
-                            <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{p.company_name}</p>
-                            {p.enriched && <span style={{ fontSize: 9, fontWeight: 700, color: DS.primary, background: DS.accentLight, padding: '1px 5px', borderRadius: 10, flexShrink: 0 }}>✦</span>}
-                          </div>
-                          {p.contact_name && (
-                            <p style={{ fontSize: 11, color: DS.secondary, marginBottom: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {p.contact_name}{p.contact_title ? ` · ${p.contact_title}` : ''}
-                            </p>
-                          )}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }} onClick={e => e.stopPropagation()}>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                              <button onClick={() => move(p, 'back')} disabled={stageIdx === 0} style={{ ...arrBtn, color: stageIdx === 0 ? DS.muted : DS.secondary, cursor: stageIdx === 0 ? 'not-allowed' : 'pointer' }} aria-label="Move back">
-                                <ChevronLeft size={11} />
-                              </button>
-                              <button onClick={() => move(p, 'forward')} disabled={stageIdx >= FORWARD_LIMIT} style={{ ...arrBtn, color: stageIdx >= FORWARD_LIMIT ? DS.muted : DS.secondary, cursor: stageIdx >= FORWARD_LIMIT ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
-                                <ChevronRight size={11} />
-                              </button>
-                            </div>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                              <button onClick={() => draftEmailFor(p)} disabled={draftLoading && draftFor?.id === p.id}
-                                style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
-                                {draftLoading && draftFor?.id === p.id ? <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={9} />}
-                                Email
-                              </button>
-                              <button onClick={() => openCoach(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
-                                <Bot size={9} /> Coach
-                              </button>
-                              {stageIdx < FORWARD_LIMIT && (
-                                <button onClick={() => markLost(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600, color: '#DC2626' }}>
-                                  Lost
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
+        {outreachProspects.length === 0 ? (
+          <div style={{ border: `2px dashed ${DS.cardBorder}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: DS.bodyText, marginBottom: 5 }}>Nothing in outreach right now</p>
+            <p style={{ fontSize: 12.5, color: DS.secondary }}>Find prospects in the Prospecting tab and save them here to start reaching out.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {outreachProspects.map(p => {
+              const st = STAGE_STYLE[p.stage]
+              return (
+                <div
+                  key={p.id}
+                  style={{ background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', transition: 'border-color 0.15s' }}
+                  onClick={() => onSelect(p)}
+                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = DS.cardHover }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = DS.cardBorder }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.company_name}</p>
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: st.color, background: st.bg, padding: '1px 7px', borderRadius: 20, flexShrink: 0 }}>{p.stage}</span>
+                    </div>
+                    <p style={{ fontSize: 11.5, color: DS.secondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.contact_name}{p.contact_title ? ` · ${p.contact_title}` : ''}
+                      {p.last_outreach_at ? ` · contacted ${new Date(p.last_outreach_at).toLocaleDateString()}` : ''}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                    <button onClick={() => draftEmailFor(p)} disabled={draftLoading && draftFor?.id === p.id} style={btn}>
+                      {draftLoading && draftFor?.id === p.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={11} />}
+                      Email
+                    </button>
+                    <button onClick={() => openCoach(p)} style={btn}>
+                      <Bot size={11} /> Coach
+                    </button>
+                    {p.stage === 'Contacted' && (
+                      <button onClick={() => markReplied(p)} disabled={replyingId === p.id}
+                        style={{ ...btn, border: `1px solid ${DS.primary}`, color: DS.primary, background: DS.accentLight }}>
+                        {replyingId === p.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />}
+                        Mark Replied
+                      </button>
+                    )}
+                    <button onClick={() => markLost(p)} style={{ ...btn, color: '#DC2626' }}>Lost</button>
+                  </div>
                 </div>
-              ) : (
-                <div style={{ border: `1.5px dashed ${DS.cardBorder}`, borderRadius: 9, padding: '10px 13px', marginBottom: 4 }}>
-                  <span style={{ fontSize: 11.5, color: DS.muted }}>No prospects in {stage}</span>
-                </div>
-              )}
-            </div>
-          )
-        })}
+              )
+            })}
+          </div>
+        )}
       </div>
       {draftEmail && (
         <EmailModal
@@ -1732,7 +1683,7 @@ function PipelineTab({
 
 // ── Prospects View ────────────────────────────────────────────────────────────
 
-type Tab = 'search' | 'lists' | 'pipeline'
+type Tab = 'search' | 'lists' | 'outreach'
 
 export function ProspectsView({
   business,
@@ -1750,10 +1701,12 @@ export function ProspectsView({
   const changeStage   = (id: string, stage: ProspectStage, lastOutreachAt?: string | null) =>
     setProspects(prev => prev.map(p => p.id === id ? { ...p, stage, ...(lastOutreachAt !== undefined ? { last_outreach_at: lastOutreachAt } : {}) } : p))
 
+  const outreachCount = prospects.filter(p => OUTREACH_STAGES.includes(p.stage)).length
+
   const TABS: { id: Tab; label: string; icon: typeof Search }[] = [
-    { id: 'search',   label: 'Prospecting', icon: Search    },
-    { id: 'lists',    label: 'My Lists',  icon: Upload    },
-    { id: 'pipeline', label: 'Sales Pipeline', icon: GitBranch },
+    { id: 'search',    label: 'Prospecting', icon: Search },
+    { id: 'lists',     label: 'My Lists',    icon: Upload },
+    { id: 'outreach',  label: 'Outreach',    icon: Send   },
   ]
 
   return (
@@ -1795,9 +1748,9 @@ export function ProspectsView({
               >
                 <Icon size={12} />
                 {label}
-                {id === 'pipeline' && prospects.length > 0 && (
+                {id === 'outreach' && outreachCount > 0 && (
                   <span style={{ fontSize: 10, fontWeight: 700, color: active ? DS.primary : DS.muted, background: active ? DS.accentLight : DS.pageBg, padding: '1px 6px', borderRadius: 20 }}>
-                    {prospects.length}
+                    {outreachCount}
                   </span>
                 )}
               </button>
@@ -1813,8 +1766,8 @@ export function ProspectsView({
       {activeTab === 'lists' && (
         <MyListsTab business={business} prospects={prospects} onProspectsAdded={ps => setProspects(prev => [...ps, ...prev])} />
       )}
-      {activeTab === 'pipeline' && (
-        <PipelineTab business={business} prospects={prospects} onStageChange={changeStage} onSelect={setSelected} />
+      {activeTab === 'outreach' && (
+        <OutreachTab business={business} prospects={prospects} onStageChange={changeStage} onSelect={setSelected} />
       )}
 
       {selected && (
