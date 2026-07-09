@@ -15,7 +15,7 @@ export default async function PipelinePage() {
   if (!business) return null
 
   const [deals, prospects] = await Promise.all([
-    getDeals(business.id),
+    getDeals(business.id), // now returns DealWithHealth[] via the deal_health view
     getProspects(business.id),
   ])
 

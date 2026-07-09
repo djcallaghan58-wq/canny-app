@@ -4,19 +4,21 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase-server'
 import { resolveBusinessForUser } from '@/lib/resolve-business'
-import type { Deal, DealStage, LossReason } from '@/types/deals'
+import type { Deal, DealStage, DealWithHealth, LossReason } from '@/types/deals'
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
+// Reads from deal_health (a view over deals, security_invoker) rather than
+// deals directly, so cards can show a health badge without a second query.
 
-export async function getDeals(businessId: string): Promise<Deal[]> {
+export async function getDeals(businessId: string): Promise<DealWithHealth[]> {
   try {
     const supabase = createAdminClient()
     const { data } = await supabase
-      .from('deals')
+      .from('deal_health')
       .select('*')
       .eq('business_id', businessId)
       .order('created_at', { ascending: false })
-    return (data as Deal[]) ?? []
+    return (data as DealWithHealth[]) ?? []
   } catch {
     return []
   }
@@ -115,6 +117,12 @@ export async function promoteProspectToDeal(
       { onConflict: 'business_id,stage', ignoreDuplicates: true },
     )
 
+    const nextActivityAt = await scheduleAutoFollowup(supabase, deal.id, businessId, 'Replied', deal.company_name)
+    if (nextActivityAt) {
+      await supabase.from('deals').update({ next_activity_at: nextActivityAt }).eq('id', deal.id)
+      deal.next_activity_at = nextActivityAt
+    }
+
     revalidatePath('/dashboard/prospects')
     revalidatePath('/dashboard/pipeline')
     return { success: true, deal: deal as Deal }
@@ -128,10 +136,39 @@ export async function promoteProspectToDeal(
 // Phase 1 keeps these deliberately minimal (write + timeline log only).
 // Auto-follow-up activity creation and won/lost gating are Phase 2.
 
+// Moving into a stage that has stage_settings.auto_followup_days set creates
+// a follow-up activity due N days out and sets deals.next_activity_at to
+// match - this is what makes deal_health's overdue/rotting/healthy states
+// mean anything instead of every open deal permanently showing
+// "no_next_step". The activity itself isn't surfaced anywhere in the UI yet
+// (that's the Daily Briefing, Phase 3) - it's just written now so the health
+// signal is real once that view exists.
+async function scheduleAutoFollowup(
+  supabase: ReturnType<typeof createAdminClient>,
+  dealId: string, businessId: string, stage: DealStage, companyName: string,
+): Promise<string | null> {
+  const { data: setting } = await supabase
+    .from('stage_settings')
+    .select('auto_followup_days')
+    .eq('business_id', businessId).eq('stage', stage)
+    .maybeSingle()
+
+  if (!setting?.auto_followup_days) return null
+
+  const dueAt = new Date(Date.now() + setting.auto_followup_days * 24 * 60 * 60 * 1000).toISOString()
+  await supabase.from('activities').insert({
+    deal_id: dealId, business_id: businessId, type: 'email',
+    title: `Follow up on ${companyName} - ${stage}`,
+    due_at: dueAt, created_by: 'salevo',
+  })
+  return dueAt
+}
+
 export async function updateDealStage(
   id: string,
   businessId: string,
   stage: DealStage,
+  value?: number,
 ): Promise<{ success: boolean; deal?: Deal; error?: string }> {
   const { userId } = await auth()
   if (!userId) return { success: false, error: 'Not authenticated' }
@@ -141,12 +178,19 @@ export async function updateDealStage(
     if (!biz || biz.id !== businessId) return { success: false, error: 'Business not found' }
 
     const { data: current } = await supabase
-      .from('deals').select('stage').eq('id', id).eq('business_id', businessId).maybeSingle()
+      .from('deals').select('stage, company_name').eq('id', id).eq('business_id', businessId).maybeSingle()
     if (!current) return { success: false, error: 'Deal not found' }
 
+    if (stage === 'Closed Won' && !value) {
+      return { success: false, error: 'A deal value is required to mark this Won' }
+    }
+
     const now = new Date().toISOString()
+    const nextActivityAt = await scheduleAutoFollowup(supabase, id, businessId, stage, current.company_name)
+
     const patch: Record<string, unknown> = { stage, last_activity_at: now, updated_at: now }
-    if (stage === 'Closed Won') patch.won_at = now
+    if (nextActivityAt) patch.next_activity_at = nextActivityAt
+    if (stage === 'Closed Won') { patch.won_at = now; patch.value = value }
     if (stage === 'Closed Lost') patch.lost_at = now
 
     const { data: deal, error } = await supabase
@@ -154,7 +198,7 @@ export async function updateDealStage(
     if (error) return { success: false, error: error.message }
 
     await supabase.from('timeline_events').insert({
-      deal_id: id, business_id: businessId, type: 'stage_change',
+      deal_id: id, business_id: businessId, type: stage === 'Closed Won' ? 'deal_won' : 'stage_change',
       payload: { from: current.stage, to: stage },
     })
 
@@ -168,10 +212,11 @@ export async function updateDealStage(
 export async function markDealLost(
   id: string,
   businessId: string,
-  lossReason?: LossReason,
+  lossReason: LossReason,
 ): Promise<{ success: boolean; deal?: Deal; error?: string }> {
   const { userId } = await auth()
   if (!userId) return { success: false, error: 'Not authenticated' }
+  if (!lossReason) return { success: false, error: 'A loss reason is required' }
   try {
     const supabase = createAdminClient()
     const biz = await resolveBusinessForUser(userId)
@@ -180,14 +225,14 @@ export async function markDealLost(
     const now = new Date().toISOString()
     const { data: deal, error } = await supabase
       .from('deals')
-      .update({ stage: 'Closed Lost', lost_at: now, loss_reason: lossReason ?? null, last_activity_at: now, updated_at: now })
+      .update({ stage: 'Closed Lost', lost_at: now, loss_reason: lossReason, last_activity_at: now, updated_at: now })
       .eq('id', id).eq('business_id', businessId)
       .select().single()
     if (error) return { success: false, error: error.message }
 
     await supabase.from('timeline_events').insert({
       deal_id: id, business_id: businessId, type: 'deal_lost',
-      payload: { loss_reason: lossReason ?? null },
+      payload: { loss_reason: lossReason },
     })
 
     revalidatePath('/dashboard/pipeline')

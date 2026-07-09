@@ -4,10 +4,35 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, Mail, Bot, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import type { Business, Prospect } from '@/lib/supabase'
-import type { Deal, DealStage } from '@/types/deals'
+import type { Deal, DealStage, DealWithHealth, DealHealth, LossReason } from '@/types/deals'
 import { touchDeal, updateDealStage, markDealLost, updateDeal } from '@/app/actions/deals'
 import { FollowupsTab } from '@/app/components/followups-tab'
 import { EmailModal, PIPELINE_STAGES, STAGE_STYLE, type DraftEmail } from '@/app/components/prospects-view'
+
+const HEALTH_STYLE: Record<DealHealth, { color: string; label: string } | null> = {
+  healthy:       null,
+  closed:        null,
+  no_next_step:  { color: '#9CA3AF', label: 'No next step' },
+  overdue:       { color: '#DC2626', label: 'Overdue' },
+  rotting:       { color: '#D97706', label: 'Going cold' },
+}
+
+function computeHealth(d: Deal, rottingDays: number): DealHealth {
+  if (d.stage === 'Closed Won' || d.stage === 'Closed Lost') return 'closed'
+  if (!d.next_activity_at) return 'no_next_step'
+  if (new Date(d.next_activity_at) < new Date()) return 'overdue'
+  if (new Date(d.last_activity_at) < new Date(Date.now() - rottingDays * 24 * 60 * 60 * 1000)) return 'rotting'
+  return 'healthy'
+}
+
+const LOSS_REASONS: { value: LossReason; label: string }[] = [
+  { value: 'price',       label: 'Price' },
+  { value: 'competitor',  label: 'Went with a competitor' },
+  { value: 'timing',      label: 'Bad timing' },
+  { value: 'no_response', label: 'Went cold / no response' },
+  { value: 'not_a_fit',   label: 'Not a fit' },
+  { value: 'other',       label: 'Other' },
+]
 
 // ── Design tokens (matches prospects-view.tsx) ────────────────────────────────
 const DS = {
@@ -38,19 +63,28 @@ export function SalesPipelineView({
   business, initialDeals, initialProspects,
 }: {
   business: Business
-  initialDeals: Deal[]
+  initialDeals: DealWithHealth[]
   initialProspects: Prospect[]
 }) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('pipeline')
-  const [deals,    setDeals]    = useState<Deal[]>(initialDeals)
-  const [selected, setSelected] = useState<Deal | null>(null)
+  const [deals,    setDeals]    = useState<DealWithHealth[]>(initialDeals)
+  const [selected, setSelected] = useState<DealWithHealth | null>(null)
 
   const prospectsById = new Map(initialProspects.map(p => [p.id, p]))
   const researchFor = (d: Deal): Prospect | null => (d.prospect_id && prospectsById.get(d.prospect_id)) || null
 
+  // Server writes only ever touch the deals table (not the deal_health
+  // view), so after a stage/value change we recompute health locally from
+  // the same rules the view uses, rather than refetching. Safe because a
+  // stage change always resets last_activity_at (and usually next_activity_at)
+  // server-side, so the recomputed value matches what a refetch would show.
   const patchDeal = (id: string, patch: Partial<Deal>) =>
-    setDeals(prev => prev.map(d => d.id === id ? { ...d, ...patch } : d))
+    setDeals(prev => prev.map(d => {
+      if (d.id !== id) return d
+      const merged = { ...d, ...patch }
+      return { ...merged, health: computeHealth(merged, merged.rotting_days) }
+    }))
 
   const openStages: DealStage[] = PIPELINE_STAGES.filter(s => s !== 'Closed Won' && s !== 'Closed Lost')
   const openDeals   = deals.filter(d => openStages.includes(d.stage))
@@ -69,24 +103,46 @@ export function SalesPipelineView({
   const [errorToast, setErrorToast] = useState<string | null>(null)
   const showError = (msg: string) => { setErrorToast(msg); setTimeout(() => setErrorToast(null), 6000) }
 
-  const move = async (d: Deal, dir: 'back' | 'forward') => {
-    const idx  = PIPELINE_STAGES.indexOf(d.stage)
-    const next = dir === 'forward' ? idx + 1 : idx - 1
-    if (next < 0 || next > FORWARD_LIMIT) return
-    const newStage = PIPELINE_STAGES[next]
+  const [wonPromptFor, setWonPromptFor] = useState<Deal | null>(null)
+  const [lostPromptFor, setLostPromptFor] = useState<Deal | null>(null)
+
+  const applyStageChange = async (d: Deal, newStage: DealStage, value?: number) => {
     setSavingId(d.id)
-    const result = await updateDealStage(d.id, business.id, newStage)
+    const result = await updateDealStage(d.id, business.id, newStage, value)
     if (result.success && result.deal) patchDeal(d.id, result.deal)
     else showError(`Couldn't update ${d.company_name}: ${result.error ?? 'unknown error'}`)
     setSavingId(null)
   }
 
-  const markLost = async (d: Deal) => {
+  const move = async (d: Deal, dir: 'back' | 'forward') => {
+    const idx  = PIPELINE_STAGES.indexOf(d.stage)
+    const next = dir === 'forward' ? idx + 1 : idx - 1
+    if (next < 0 || next > FORWARD_LIMIT) return
+    const newStage = PIPELINE_STAGES[next]
+    // Won is impossible without a value - prompt instead of writing.
+    if (newStage === 'Closed Won' && !d.value) { setWonPromptFor(d); return }
+    await applyStageChange(d, newStage, d.value ?? undefined)
+  }
+
+  // Lost is impossible without a reason - always prompt, never write directly.
+  const markLost = (d: Deal) => setLostPromptFor(d)
+
+  const confirmLost = async (d: Deal, reason: LossReason) => {
     setSavingId(d.id)
-    const result = await markDealLost(d.id, business.id)
+    const result = await markDealLost(d.id, business.id, reason)
     if (result.success && result.deal) patchDeal(d.id, result.deal)
     else showError(`Couldn't mark ${d.company_name} lost: ${result.error ?? 'unknown error'}`)
     setSavingId(null)
+    setLostPromptFor(null)
+  }
+
+  const confirmWon = async (d: Deal, value: number) => {
+    setSavingId(d.id)
+    const result = await updateDealStage(d.id, business.id, 'Closed Won', value)
+    if (result.success && result.deal) patchDeal(d.id, result.deal)
+    else showError(`Couldn't mark ${d.company_name} won: ${result.error ?? 'unknown error'}`)
+    setSavingId(null)
+    setWonPromptFor(null)
   }
 
   const openCoach = (d: Deal) => {
@@ -232,7 +288,12 @@ export function SalesPipelineView({
                           <div style={{ height: 3, background: st.color, opacity: 0.6 }} />
                           <div style={{ padding: '11px 12px' }}>
                             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 3 }}>
-                              <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{d.company_name}</p>
+                              <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {HEALTH_STYLE[d.health] && (
+                                  <span title={HEALTH_STYLE[d.health]!.label} style={{ width: 7, height: 7, borderRadius: '50%', background: HEALTH_STYLE[d.health]!.color, flexShrink: 0 }} />
+                                )}
+                                {d.company_name}
+                              </p>
                               {!!d.value && d.value > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: DS.primary }}>${d.value.toLocaleString()}</span>}
                             </div>
                             {d.contact_name && (
@@ -292,7 +353,7 @@ export function SalesPipelineView({
             const result = await updateDeal(selected.id, business.id, patch)
             if (result.success && result.deal) {
               patchDeal(selected.id, result.deal)
-              setSelected(result.deal)
+              setSelected(prev => prev ? { ...prev, ...result.deal } : prev)
             }
             return result.success
           }}
@@ -310,7 +371,73 @@ export function SalesPipelineView({
           }}
         />
       )}
+
+      {wonPromptFor && (
+        <WonModal
+          deal={wonPromptFor}
+          onCancel={() => setWonPromptFor(null)}
+          onConfirm={value => confirmWon(wonPromptFor, value)}
+        />
+      )}
+
+      {lostPromptFor && (
+        <LostModal
+          deal={lostPromptFor}
+          onCancel={() => setLostPromptFor(null)}
+          onConfirm={reason => confirmLost(lostPromptFor, reason)}
+        />
+      )}
     </>
+  )
+}
+
+function WonModal({ deal, onCancel, onConfirm }: { deal: Deal; onCancel: () => void; onConfirm: (value: number) => void }) {
+  const [value, setValue] = useState(deal.value || 0)
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 400 }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} style={{ background: DS.cardBg, borderRadius: 12, padding: 22, width: 320, boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: DS.bodyText, marginBottom: 4 }}>Mark {deal.company_name} Won</p>
+        <p style={{ fontSize: 12.5, color: DS.secondary, marginBottom: 14 }}>What&apos;s the deal value?</p>
+        <input
+          type="number" autoFocus value={value} onChange={e => setValue(Number(e.target.value))}
+          placeholder="0"
+          style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: `1.5px solid ${DS.outlineBorder}`, background: DS.inputBg, fontSize: 14, color: DS.bodyText, fontFamily: 'inherit', outline: 'none', marginBottom: 16 }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{ padding: '7px 14px', borderRadius: 7, border: `1px solid ${DS.cardBorder}`, background: 'none', color: DS.secondary, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+          <button onClick={() => value > 0 && onConfirm(value)} disabled={!value} style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: value ? DS.primary : DS.muted, color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: value ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>Mark Won</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LostModal({ deal, onCancel, onConfirm }: { deal: Deal; onCancel: () => void; onConfirm: (reason: LossReason) => void }) {
+  const [reason, setReason] = useState<LossReason | null>(null)
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 400 }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} style={{ background: DS.cardBg, borderRadius: 12, padding: 22, width: 340, boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: DS.bodyText, marginBottom: 4 }}>Mark {deal.company_name} Lost</p>
+        <p style={{ fontSize: 12.5, color: DS.secondary, marginBottom: 14 }}>Why? This feeds the loss-reason report later.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+          {LOSS_REASONS.map(r => (
+            <button key={r.value} onClick={() => setReason(r.value)} style={{
+              textAlign: 'left', padding: '7px 11px', borderRadius: 7,
+              border: `1.5px solid ${reason === r.value ? DS.primary : DS.cardBorder}`,
+              background: reason === r.value ? DS.accentLight : 'transparent',
+              color: reason === r.value ? DS.primary : DS.bodyText,
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{ padding: '7px 14px', borderRadius: 7, border: `1px solid ${DS.cardBorder}`, background: 'none', color: DS.secondary, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+          <button onClick={() => reason && onConfirm(reason)} disabled={!reason} style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: reason ? '#DC2626' : DS.muted, color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: reason ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>Mark Lost</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -320,7 +447,7 @@ export function SalesPipelineView({
 function DealDetail({
   deal, research, onClose, onSave,
 }: {
-  deal: Deal
+  deal: DealWithHealth
   research: Prospect | null
   onClose: () => void
   onSave: (patch: Partial<Pick<Deal, 'value' | 'contact_name' | 'contact_email' | 'contact_phone'>>) => Promise<boolean>
@@ -361,11 +488,21 @@ function DealDetail({
               <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, padding: '2px 9px', borderRadius: 20 }}>
                 {deal.stage}
               </span>
+              {HEALTH_STYLE[deal.health] && (
+                <span style={{ fontSize: 10, fontWeight: 700, color: HEALTH_STYLE[deal.health]!.color, marginLeft: 6 }}>
+                  ● {HEALTH_STYLE[deal.health]!.label}
+                </span>
+              )}
             </div>
             <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.muted, padding: 3, display: 'flex' }}>
               <X size={17} />
             </button>
           </div>
+          {deal.next_activity_at && (
+            <p style={{ fontSize: 11.5, color: DS.secondary, marginTop: 8 }}>
+              Next follow-up: {new Date(deal.next_activity_at).toLocaleDateString()}
+            </p>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent` }}>
