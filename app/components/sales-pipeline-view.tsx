@@ -2,11 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Mail, Bot, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Mail, Bot, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import type { Business, Prospect } from '@/lib/supabase'
 import type { Deal, DealStage, DealWithHealth, DealHealth, LossReason } from '@/types/deals'
 import { touchDeal, updateDealStage, markDealLost, updateDeal } from '@/app/actions/deals'
-import { FollowupsTab } from '@/app/components/followups-tab'
 import { EmailModal, PIPELINE_STAGES, STAGE_STYLE, type DraftEmail } from '@/app/components/prospects-view'
 
 const HEALTH_STYLE: Record<DealHealth, { color: string; label: string } | null> = {
@@ -52,13 +51,15 @@ const DS = {
   inputBg:       '#F7F9F8',
 }
 
-type Tab = 'pipeline' | 'followups'
-
 // A deal only lands here once a prospect has actually replied - New and
 // Contacted prospects live in Prospecting > Outreach instead. This board
 // reads and writes the deals table exclusively; prospects are only looked
 // up (via deal.prospect_id) for read-only research context - pain points,
 // pitch angle - when drafting an email or opening detail.
+// Note: the "Follow-ups" tab that used to live here moved to Prospecting -
+// those are accounts still in early-stage outreach (Contacted, not yet
+// replied), not deals, so they never belonged on this board. See
+// app/components/prospects-view.tsx.
 export function SalesPipelineView({
   business, initialDeals, initialProspects,
 }: {
@@ -67,7 +68,6 @@ export function SalesPipelineView({
   initialProspects: Prospect[]
 }) {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<Tab>('pipeline')
   const [deals,    setDeals]    = useState<DealWithHealth[]>(initialDeals)
   const [selected, setSelected] = useState<DealWithHealth | null>(null)
 
@@ -211,32 +211,9 @@ export function SalesPipelineView({
             </p>
           </div>
         </div>
-
-        <div style={{ display: 'flex', gap: 2 }}>
-          {(['pipeline', 'followups'] as const).map(tab => {
-            const active = activeTab === tab
-            return (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 14px', borderRadius: '7px 7px 0 0',
-                border: 'none', background: active ? DS.pageBg : 'transparent',
-                color: active ? DS.primary : DS.secondary,
-                fontSize: 12.5, fontWeight: active ? 700 : 500,
-                cursor: 'pointer', fontFamily: 'inherit',
-                borderBottom: active ? `2px solid ${DS.primary}` : '2px solid transparent',
-                transition: 'all 0.15s', marginBottom: -1,
-              }}>
-                {tab === 'pipeline' ? 'Pipeline' : (<><Bell size={11} /> Follow-ups</>)}
-              </button>
-            )
-          })}
-        </div>
       </div>
 
-      {activeTab === 'followups' && <FollowupsTab business={business} />}
-
-      {activeTab === 'pipeline' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px 32px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px 32px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
           <style>{`
             .deal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
             @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -336,7 +313,6 @@ export function SalesPipelineView({
             )
           })}
         </div>
-      )}
 
       {errorToast && (
         <div style={{ position: 'fixed', bottom: 20, right: 20, background: '#DC2626', color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, boxShadow: '0 4px 16px rgba(0,0,0,0.2)', zIndex: 1000, maxWidth: 360 }}>

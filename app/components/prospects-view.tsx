@@ -5,7 +5,7 @@ import { stripDashes } from '@/lib/strip-dashes'
 import { useRouter } from 'next/navigation'
 import {
   Search, Upload, Send, X,
-  Bot, Mail, Plus, Loader2, Copy, Check,
+  Bot, Mail, Plus, Loader2, Copy, Check, Bell,
 } from 'lucide-react'
 import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/supabase'
 import {
@@ -15,6 +15,7 @@ import {
 } from '@/app/actions/prospects'
 import { promoteProspectToDeal } from '@/app/actions/deals'
 import { saveEmailAsStyle } from '@/app/actions/writing-styles'
+import { FollowupsTab } from '@/app/components/followups-tab'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
@@ -1727,7 +1728,7 @@ function OutreachTab({
 
 // ── Prospects View ────────────────────────────────────────────────────────────
 
-type Tab = 'search' | 'lists' | 'outreach'
+type Tab = 'search' | 'lists' | 'outreach' | 'followups'
 
 export function ProspectsView({
   business,
@@ -1758,6 +1759,7 @@ export function ProspectsView({
     { id: 'search',    label: 'Prospecting', icon: Search },
     { id: 'lists',     label: 'My Lists',    icon: Upload },
     { id: 'outreach',  label: 'Outreach',    icon: Send   },
+    { id: 'followups', label: 'Follow-ups',  icon: Bell   },
   ]
 
   return (
@@ -1823,6 +1825,9 @@ export function ProspectsView({
           onStageChange={changeStage} onSelect={setSelected}
           onPromoted={markPromoted} onDismissed={markDismissed}
         />
+      )}
+      {activeTab === 'followups' && (
+        <FollowupsTab business={business} />
       )}
 
       {selected && (
