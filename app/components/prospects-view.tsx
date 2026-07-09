@@ -11,8 +11,9 @@ import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/su
 import {
   createProspect, updateProspectStage, updateProspect, importProspects,
   saveProspectFromSearch, checkRecentSearch, saveSearch,
-  markProspectOutreachSent, getProspects,
+  markProspectOutreachSent, getProspects, dismissProspect,
 } from '@/app/actions/prospects'
+import { promoteProspectToDeal } from '@/app/actions/deals'
 import { saveEmailAsStyle } from '@/app/actions/writing-styles'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -430,8 +431,12 @@ export function ProspectDetail({
 
           <div style={{ marginBottom: 18 }}>
             <p style={lbl}>Stage</p>
+            {/* Only New/Contacted are selectable here - this panel only ever
+                opens for prospects still in Outreach (status !== 'pipeline').
+                Replied+ is a deal, created exclusively via "Mark Replied" in
+                the Outreach list, never by clicking a pill. */}
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-              {STAGES.map(s => {
+              {OUTREACH_STAGES.map(s => {
                 const st     = STAGE_STYLE[s]
                 const active = s === stage
                 return (
@@ -447,6 +452,11 @@ export function ProspectDetail({
                 )
               })}
             </div>
+            {PIPELINE_STAGES.includes(stage) && (
+              <p style={{ fontSize: 11, color: DS.secondary, marginTop: 6 }}>
+                This prospect has replied and is now tracked as a deal in the Pipeline.
+              </p>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
@@ -1550,19 +1560,28 @@ function MyListsTab({
 // sales-pipeline-view.tsx) and they drop off this list.
 
 function OutreachTab({
-  business, prospects, onStageChange, onSelect,
+  business, prospects, onStageChange, onSelect, onPromoted, onDismissed,
 }: {
   business: Business; prospects: Prospect[]
   onStageChange: (id: string, stage: ProspectStage, lastOutreachAt?: string | null) => void
   onSelect: (p: Prospect) => void
+  onPromoted: (id: string) => void
+  onDismissed: (id: string) => void
 }) {
   const router = useRouter()
-  const outreachProspects = prospects.filter(p => OUTREACH_STAGES.includes(p.stage))
+  const outreachProspects = prospects.filter(p => OUTREACH_STAGES.includes(p.stage) && p.status !== 'pipeline')
 
   const [draftFor,     setDraftFor]     = useState<Prospect | null>(null)
   const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
   const [draftLoading, setDraftLoading] = useState(false)
   const [replyingId,   setReplyingId]   = useState<string | null>(null)
+  const [losingId,     setLosingId]     = useState<string | null>(null)
+  const [errorToast,   setErrorToast]   = useState<string | null>(null)
+
+  const showError = (msg: string) => {
+    setErrorToast(msg)
+    setTimeout(() => setErrorToast(null), 6000)
+  }
 
   const draftEmailFor = async (p: Prospect) => {
     setDraftFor(p); setDraftLoading(true)
@@ -1575,16 +1594,34 @@ function OutreachTab({
     setDraftLoading(false)
   }
 
+  // This is the real "Add to Pipeline" moment now: a deal only gets created
+  // once a prospect has actually replied. The prospect's own stage is left
+  // untouched - status flips to 'pipeline' purely so it drops out of this
+  // list. No optimistic UI: only remove it from Outreach once the deal
+  // insert is confirmed by the server.
   const markReplied = async (p: Prospect) => {
     setReplyingId(p.id)
-    onStageChange(p.id, 'Replied')
-    await updateProspectStage(p.id, 'Replied')
+    const result = await promoteProspectToDeal(p.id, business.id)
+    if (result.success) {
+      onPromoted(p.id)
+    } else {
+      showError(`Couldn't move ${p.company_name} to the pipeline: ${result.error ?? 'unknown error'}`)
+    }
     setReplyingId(null)
   }
 
+  // Marking Lost here means "never replied, done outreaching" - there's no
+  // deal yet, so this dismisses the prospect rather than forcing it through
+  // deal-only stage values it never earned.
   const markLost = async (p: Prospect) => {
-    onStageChange(p.id, 'Closed Lost')
-    await updateProspectStage(p.id, 'Closed Lost')
+    setLosingId(p.id)
+    const result = await dismissProspect(p.id, 'not_a_fit')
+    if (result.success) {
+      onDismissed(p.id)
+    } else {
+      showError(`Couldn't dismiss ${p.company_name}`)
+    }
+    setLosingId(null)
   }
 
   const openCoach = (p: Prospect) => {
@@ -1654,7 +1691,9 @@ function OutreachTab({
                         Mark Replied
                       </button>
                     )}
-                    <button onClick={() => markLost(p)} style={{ ...btn, color: '#DC2626' }}>Lost</button>
+                    <button onClick={() => markLost(p)} disabled={losingId === p.id} style={{ ...btn, color: '#DC2626' }}>
+                      {losingId === p.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : 'Lost'}
+                    </button>
                   </div>
                 </div>
               )
@@ -1662,6 +1701,11 @@ function OutreachTab({
           </div>
         )}
       </div>
+      {errorToast && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, background: '#DC2626', color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, boxShadow: '0 4px 16px rgba(0,0,0,0.2)', zIndex: 1000, maxWidth: 360 }}>
+          {errorToast}
+        </div>
+      )}
       {draftEmail && (
         <EmailModal
           email={draftEmail}
@@ -1701,7 +1745,14 @@ export function ProspectsView({
   const changeStage   = (id: string, stage: ProspectStage, lastOutreachAt?: string | null) =>
     setProspects(prev => prev.map(p => p.id === id ? { ...p, stage, ...(lastOutreachAt !== undefined ? { last_outreach_at: lastOutreachAt } : {}) } : p))
 
-  const outreachCount = prospects.filter(p => OUTREACH_STAGES.includes(p.stage)).length
+  // Deal now exists for this prospect - drop it from Outreach without
+  // touching its stage (the deal owns pipeline progression from here).
+  const markPromoted = (id: string) =>
+    setProspects(prev => prev.map(p => p.id === id ? { ...p, status: 'pipeline' } : p))
+  const markDismissed = (id: string) =>
+    setProspects(prev => prev.map(p => p.id === id ? { ...p, status: 'dismissed' } : p))
+
+  const outreachCount = prospects.filter(p => OUTREACH_STAGES.includes(p.stage) && p.status !== 'pipeline').length
 
   const TABS: { id: Tab; label: string; icon: typeof Search }[] = [
     { id: 'search',    label: 'Prospecting', icon: Search },
@@ -1767,7 +1818,11 @@ export function ProspectsView({
         <MyListsTab business={business} prospects={prospects} onProspectsAdded={ps => setProspects(prev => [...ps, ...prev])} />
       )}
       {activeTab === 'outreach' && (
-        <OutreachTab business={business} prospects={prospects} onStageChange={changeStage} onSelect={setSelected} />
+        <OutreachTab
+          business={business} prospects={prospects}
+          onStageChange={changeStage} onSelect={setSelected}
+          onPromoted={markPromoted} onDismissed={markDismissed}
+        />
       )}
 
       {selected && (

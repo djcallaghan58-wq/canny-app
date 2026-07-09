@@ -2,13 +2,12 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Mail, Bot, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
-import type { Business, Prospect, ProspectStage } from '@/lib/supabase'
-import { updateProspectStage, markProspectOutreachSent } from '@/app/actions/prospects'
+import { Bell, Mail, Bot, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import type { Business, Prospect } from '@/lib/supabase'
+import type { Deal, DealStage } from '@/types/deals'
+import { touchDeal, updateDealStage, markDealLost, updateDeal } from '@/app/actions/deals'
 import { FollowupsTab } from '@/app/components/followups-tab'
-import {
-  ProspectDetail, EmailModal, PIPELINE_STAGES, STAGE_STYLE, type DraftEmail,
-} from '@/app/components/prospects-view'
+import { EmailModal, PIPELINE_STAGES, STAGE_STYLE, type DraftEmail } from '@/app/components/prospects-view'
 
 // ── Design tokens (matches prospects-view.tsx) ────────────────────────────────
 const DS = {
@@ -31,35 +30,34 @@ const DS = {
 type Tab = 'pipeline' | 'followups'
 
 // A deal only lands here once a prospect has actually replied - New and
-// Contacted prospects live in Prospecting > Outreach instead. This is the
-// last mile of the funnel: Replied -> Meeting Set -> Proposal -> Closed.
+// Contacted prospects live in Prospecting > Outreach instead. This board
+// reads and writes the deals table exclusively; prospects are only looked
+// up (via deal.prospect_id) for read-only research context - pain points,
+// pitch angle - when drafting an email or opening detail.
 export function SalesPipelineView({
-  business, initialProspects,
+  business, initialDeals, initialProspects,
 }: {
   business: Business
+  initialDeals: Deal[]
   initialProspects: Prospect[]
 }) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('pipeline')
-  const [prospects, setProspects] = useState<Prospect[]>(initialProspects)
-  const [selected,  setSelected]  = useState<Prospect | null>(null)
+  const [deals,    setDeals]    = useState<Deal[]>(initialDeals)
+  const [selected, setSelected] = useState<Deal | null>(null)
 
-  const changeStage = (id: string, stage: ProspectStage, lastOutreachAt?: string | null) =>
-    setProspects(prev => prev.map(p => p.id === id
-      ? { ...p, stage, ...(lastOutreachAt !== undefined ? { last_outreach_at: lastOutreachAt } : {}) }
-      : p))
+  const prospectsById = new Map(initialProspects.map(p => [p.id, p]))
+  const researchFor = (d: Deal): Prospect | null => (d.prospect_id && prospectsById.get(d.prospect_id)) || null
 
-  const updateLocal = (p: Prospect) => setProspects(prev => prev.map(x => x.id === p.id ? p : x))
+  const patchDeal = (id: string, patch: Partial<Deal>) =>
+    setDeals(prev => prev.map(d => d.id === id ? { ...d, ...patch } : d))
 
-  // Only prospects who've actually replied show up on this board at all.
-  const dealProspects = prospects.filter(p => PIPELINE_STAGES.includes(p.stage))
-
-  const openStages: ProspectStage[] = PIPELINE_STAGES.filter(s => s !== 'Closed Won' && s !== 'Closed Lost')
-  const openDeals   = dealProspects.filter(p => openStages.includes(p.stage))
-  const openValue   = openDeals.reduce((sum, p) => sum + (p.value || 0), 0)
-  const won         = dealProspects.filter(p => p.stage === 'Closed Won')
-  const wonValue    = won.reduce((sum, p) => sum + (p.value || 0), 0)
-  const lost        = dealProspects.filter(p => p.stage === 'Closed Lost')
+  const openStages: DealStage[] = PIPELINE_STAGES.filter(s => s !== 'Closed Won' && s !== 'Closed Lost')
+  const openDeals   = deals.filter(d => openStages.includes(d.stage))
+  const openValue   = openDeals.reduce((sum, d) => sum + (d.value || 0), 0)
+  const won         = deals.filter(d => d.stage === 'Closed Won')
+  const wonValue    = won.reduce((sum, d) => sum + (d.value || 0), 0)
+  const lost        = deals.filter(d => d.stage === 'Closed Lost')
   const decided     = won.length + lost.length
   const winRate     = decided > 0 ? Math.round((won.length / decided) * 100) : null
 
@@ -67,45 +65,65 @@ export function SalesPipelineView({
   // branch you opt into explicitly, not something you nudge into.
   const FORWARD_LIMIT = PIPELINE_STAGES.indexOf('Closed Won')
 
-  const move = async (p: Prospect, dir: 'back' | 'forward') => {
-    const idx  = PIPELINE_STAGES.indexOf(p.stage)
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [errorToast, setErrorToast] = useState<string | null>(null)
+  const showError = (msg: string) => { setErrorToast(msg); setTimeout(() => setErrorToast(null), 6000) }
+
+  const move = async (d: Deal, dir: 'back' | 'forward') => {
+    const idx  = PIPELINE_STAGES.indexOf(d.stage)
     const next = dir === 'forward' ? idx + 1 : idx - 1
     if (next < 0 || next > FORWARD_LIMIT) return
     const newStage = PIPELINE_STAGES[next]
-    changeStage(p.id, newStage)
-    await updateProspectStage(p.id, newStage)
+    setSavingId(d.id)
+    const result = await updateDealStage(d.id, business.id, newStage)
+    if (result.success && result.deal) patchDeal(d.id, result.deal)
+    else showError(`Couldn't update ${d.company_name}: ${result.error ?? 'unknown error'}`)
+    setSavingId(null)
   }
 
-  const markLost = async (p: Prospect) => {
-    changeStage(p.id, 'Closed Lost')
-    await updateProspectStage(p.id, 'Closed Lost')
+  const markLost = async (d: Deal) => {
+    setSavingId(d.id)
+    const result = await markDealLost(d.id, business.id)
+    if (result.success && result.deal) patchDeal(d.id, result.deal)
+    else showError(`Couldn't mark ${d.company_name} lost: ${result.error ?? 'unknown error'}`)
+    setSavingId(null)
   }
 
-  const openCoach = (p: Prospect) => {
+  const openCoach = (d: Deal) => {
+    const p = researchFor(d)
     const prompt = [
       `Help me with this deal:`,
-      `Company: ${p.company_name}`,
-      p.contact_name ? `Contact: ${p.contact_name}, ${p.contact_title}` : '',
-      `Stage: ${p.stage}`,
-      p.pain_points ? `Pain points: ${p.pain_points}` : '',
-      p.pitch_angle ? `Pitch angle: ${p.pitch_angle}` : '',
+      `Company: ${d.company_name}`,
+      d.contact_name ? `Contact: ${d.contact_name}` : '',
+      `Stage: ${d.stage}`,
+      p?.pain_points ? `Pain points: ${p.pain_points}` : '',
+      p?.pitch_angle ? `Pitch angle: ${p.pitch_angle}` : '',
       `\nWhat's my best next move to close this?`,
     ].filter(Boolean).join('\n')
     router.push(`/dashboard/agent?prompt=${encodeURIComponent(prompt)}`)
   }
 
-  const [draftFor,     setDraftFor]     = useState<Prospect | null>(null)
+  const [draftFor,     setDraftFor]     = useState<Deal | null>(null)
   const [draftEmail,   setDraftEmail]   = useState<DraftEmail | null>(null)
   const [draftLoading, setDraftLoading] = useState(false)
 
-  const draftEmailFor = async (p: Prospect) => {
-    setDraftFor(p); setDraftLoading(true)
+  const draftEmailFor = async (d: Deal) => {
+    setDraftFor(d); setDraftLoading(true)
+    const p = researchFor(d)
+    const payload = {
+      ...(p ?? {}),
+      company_name: d.company_name,
+      contact_name: d.contact_name ?? p?.contact_name ?? '',
+      email:        d.contact_email ?? p?.email ?? '',
+      stage:        d.stage,
+      value:        d.value ?? 0,
+    }
     const res = await fetch('/api/prospect/draft-email', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prospect: p, business }),
+      body: JSON.stringify({ prospect: payload, business }),
     })
     const data = await res.json()
-    if (data.subject) setDraftEmail({ ...data, email: p.email || p.email_format || '' })
+    if (data.subject) setDraftEmail({ ...data, email: d.contact_email || p?.email || p?.email_format || '' })
     setDraftLoading(false)
   }
 
@@ -175,7 +193,7 @@ export function SalesPipelineView({
             {stat('Win rate', winRate === null ? '—' : `${winRate}%`)}
           </div>
 
-          {dealProspects.length === 0 && (
+          {deals.length === 0 && (
             <div style={{ border: `2px dashed ${DS.cardBorder}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
               <p style={{ fontSize: 14, fontWeight: 600, color: DS.bodyText, marginBottom: 5 }}>Nothing in your pipeline yet</p>
               <p style={{ fontSize: 12.5, color: DS.secondary }}>
@@ -185,9 +203,9 @@ export function SalesPipelineView({
           )}
 
           {PIPELINE_STAGES.map(stage => {
-            const stageDeals = dealProspects.filter(p => p.stage === stage)
+            const stageDeals = deals.filter(d => d.stage === stage)
             const st = STAGE_STYLE[stage]
-            if (dealProspects.length === 0) return null
+            if (deals.length === 0) return null
             return (
               <div key={stage} style={{ marginBottom: 5 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 0' }}>
@@ -200,12 +218,13 @@ export function SalesPipelineView({
 
                 {stageDeals.length > 0 ? (
                   <div className="deal-grid" style={{ marginBottom: 4 }}>
-                    {stageDeals.map(p => {
-                      const stageIdx = PIPELINE_STAGES.indexOf(p.stage)
+                    {stageDeals.map(d => {
+                      const stageIdx = PIPELINE_STAGES.indexOf(d.stage)
+                      const p = researchFor(d)
                       return (
                         <div
-                          key={p.id}
-                          onClick={() => setSelected(p)}
+                          key={d.id}
+                          onClick={() => setSelected(d)}
                           style={{ background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, overflow: 'hidden', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s' }}
                           onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = DS.cardHover; el.style.boxShadow = '0 3px 10px rgba(29,158,117,0.10)'; el.style.transform = 'translateY(-1px)' }}
                           onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = DS.cardBorder; el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)'; el.style.transform = 'none' }}
@@ -213,34 +232,34 @@ export function SalesPipelineView({
                           <div style={{ height: 3, background: st.color, opacity: 0.6 }} />
                           <div style={{ padding: '11px 12px' }}>
                             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 3 }}>
-                              <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{p.company_name}</p>
-                              {p.value > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: DS.primary }}>${p.value.toLocaleString()}</span>}
+                              <p style={{ fontSize: 12.5, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{d.company_name}</p>
+                              {!!d.value && d.value > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: DS.primary }}>${d.value.toLocaleString()}</span>}
                             </div>
-                            {p.contact_name && (
+                            {d.contact_name && (
                               <p style={{ fontSize: 11, color: DS.secondary, marginBottom: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {p.contact_name}{p.contact_title ? ` · ${p.contact_title}` : ''}
+                                {d.contact_name}{p?.contact_title ? ` · ${p.contact_title}` : ''}
                               </p>
                             )}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }} onClick={e => e.stopPropagation()}>
                               <div style={{ display: 'flex', gap: 4 }}>
-                                <button onClick={() => move(p, 'back')} disabled={stageIdx === 0} style={{ ...arrBtn, color: stageIdx === 0 ? DS.muted : DS.secondary, cursor: stageIdx === 0 ? 'not-allowed' : 'pointer' }} aria-label="Move back">
+                                <button onClick={() => move(d, 'back')} disabled={stageIdx === 0 || savingId === d.id} style={{ ...arrBtn, color: stageIdx === 0 ? DS.muted : DS.secondary, cursor: stageIdx === 0 ? 'not-allowed' : 'pointer' }} aria-label="Move back">
                                   <ChevronLeft size={11} />
                                 </button>
-                                <button onClick={() => move(p, 'forward')} disabled={stageIdx >= FORWARD_LIMIT} style={{ ...arrBtn, color: stageIdx >= FORWARD_LIMIT ? DS.muted : DS.secondary, cursor: stageIdx >= FORWARD_LIMIT ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
+                                <button onClick={() => move(d, 'forward')} disabled={stageIdx >= FORWARD_LIMIT || savingId === d.id} style={{ ...arrBtn, color: stageIdx >= FORWARD_LIMIT ? DS.muted : DS.secondary, cursor: stageIdx >= FORWARD_LIMIT ? 'not-allowed' : 'pointer' }} aria-label="Move forward">
                                   <ChevronRight size={11} />
                                 </button>
                               </div>
                               <div style={{ display: 'flex', gap: 4 }}>
-                                <button onClick={() => draftEmailFor(p)} disabled={draftLoading && draftFor?.id === p.id}
+                                <button onClick={() => draftEmailFor(d)} disabled={draftLoading && draftFor?.id === d.id}
                                   style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
-                                  {draftLoading && draftFor?.id === p.id ? <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={9} />}
+                                  {draftLoading && draftFor?.id === d.id ? <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={9} />}
                                   Email
                                 </button>
-                                <button onClick={() => openCoach(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
+                                <button onClick={() => openCoach(d)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600 }}>
                                   <Bot size={9} /> Coach
                                 </button>
                                 {stageIdx < FORWARD_LIMIT && (
-                                  <button onClick={() => markLost(p)} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600, color: '#DC2626' }}>
+                                  <button onClick={() => markLost(d)} disabled={savingId === d.id} style={{ ...arrBtn, gap: 3, padding: '0 7px', width: 'auto', fontSize: 10.5, fontWeight: 600, color: '#DC2626' }}>
                                     Lost
                                   </button>
                                 )}
@@ -258,12 +277,25 @@ export function SalesPipelineView({
         </div>
       )}
 
+      {errorToast && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, background: '#DC2626', color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, boxShadow: '0 4px 16px rgba(0,0,0,0.2)', zIndex: 1000, maxWidth: 360 }}>
+          {errorToast}
+        </div>
+      )}
+
       {selected && (
-        <ProspectDetail
-          prospect={selected}
-          business={business}
+        <DealDetail
+          deal={selected}
+          research={researchFor(selected)}
           onClose={() => setSelected(null)}
-          onUpdate={p => { updateLocal(p); setSelected(p) }}
+          onSave={async (patch) => {
+            const result = await updateDeal(selected.id, business.id, patch)
+            if (result.success && result.deal) {
+              patchDeal(selected.id, result.deal)
+              setSelected(result.deal)
+            }
+            return result.success
+          }}
         />
       )}
 
@@ -274,14 +306,123 @@ export function SalesPipelineView({
           onClose={() => { setDraftEmail(null); setDraftFor(null) }}
           onOpen={() => {
             if (!draftFor) return
-            const p = draftFor
-            ;(async () => {
-              const result = await markProspectOutreachSent(p.id, business.id)
-              if (result.stage) changeStage(p.id, result.stage, result.lastOutreachAt)
-            })()
+            void touchDeal(draftFor.id, business.id)
           }}
         />
       )}
+    </>
+  )
+}
+
+// Lightweight deal detail panel - value editing writes to the deal, research
+// context (pain points, pitch angle, notes) is read-only from the linked
+// prospect since that's where it was researched.
+function DealDetail({
+  deal, research, onClose, onSave,
+}: {
+  deal: Deal
+  research: Prospect | null
+  onClose: () => void
+  onSave: (patch: Partial<Pick<Deal, 'value' | 'contact_name' | 'contact_email' | 'contact_phone'>>) => Promise<boolean>
+}) {
+  const [value, setValue] = useState(deal.value ?? 0)
+  const [saving, setSaving] = useState(false)
+  const st = STAGE_STYLE[deal.stage]
+
+  const saveValue = async () => {
+    setSaving(true)
+    await onSave({ value })
+    setSaving(false)
+  }
+
+  const lbl: React.CSSProperties = {
+    fontSize: 9.5, fontWeight: 700, color: DS.muted,
+    letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 5,
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(8,80,65,0.25)', backdropFilter: 'blur(2px)', zIndex: 300 }} />
+      <div style={{
+        position: 'fixed', right: 0, top: 0, bottom: 0, width: 460,
+        background: DS.cardBg, zIndex: 301,
+        boxShadow: '-8px 0 32px rgba(0,0,0,0.10)',
+        display: 'flex', flexDirection: 'column',
+        animation: 'slideInRight 0.25s ease-out',
+      }}>
+        <style>{`@keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
+
+        <div style={{ padding: '18px 22px 14px', borderBottom: `1px solid ${DS.cardBorder}`, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: 15.5, fontWeight: 700, color: DS.bodyText, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {deal.company_name}
+              </p>
+              <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, padding: '2px 9px', borderRadius: 20 }}>
+                {deal.stage}
+              </span>
+            </div>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.muted, padding: 3, display: 'flex' }}>
+              <X size={17} />
+            </button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent` }}>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
+            <div style={{ flex: 1 }}>
+              <p style={lbl}>Deal Value {saving && <Loader2 size={9} style={{ animation: 'spin 1s linear infinite', display: 'inline', marginLeft: 4 }} />}</p>
+              <input
+                type="number"
+                value={value}
+                onChange={e => setValue(Number(e.target.value))}
+                onBlur={saveValue}
+                placeholder="0"
+                style={{
+                  width: '100%', padding: '6px 10px', borderRadius: 7,
+                  border: `1.5px solid ${DS.outlineBorder}`, background: DS.inputBg,
+                  fontSize: 13, color: DS.bodyText, fontFamily: 'inherit', outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={lbl}>Contact</p>
+              <p style={{ fontSize: 13, color: deal.contact_name ? DS.bodyText : DS.muted, padding: '6px 0' }}>
+                {deal.contact_name || 'No contact on file'}{research?.contact_title ? ` · ${research.contact_title}` : ''}
+              </p>
+            </div>
+          </div>
+
+          {deal.contact_email && (
+            <div style={{ marginBottom: 18 }}>
+              <p style={lbl}>Email</p>
+              <p style={{ fontSize: 13, color: DS.bodyText }}>{deal.contact_email}</p>
+            </div>
+          )}
+
+          {research && (research.pain_points || research.pitch_angle || research.company_overview) && (
+            <div style={{ marginBottom: 18 }}>
+              <p style={lbl}>Research (from prospecting)</p>
+              {research.company_overview && (
+                <p style={{ fontSize: 12.5, color: DS.secondary, marginBottom: 8, lineHeight: 1.5 }}>{research.company_overview}</p>
+              )}
+              {research.pain_points && (
+                <p style={{ fontSize: 12.5, color: DS.bodyText, marginBottom: 6, lineHeight: 1.5 }}><strong>Pain points:</strong> {research.pain_points}</p>
+              )}
+              {research.pitch_angle && (
+                <p style={{ fontSize: 12.5, color: DS.bodyText, lineHeight: 1.5 }}><strong>Pitch angle:</strong> {research.pitch_angle}</p>
+              )}
+            </div>
+          )}
+
+          {deal.loss_reason && (
+            <div style={{ marginBottom: 18 }}>
+              <p style={lbl}>Loss reason</p>
+              <p style={{ fontSize: 13, color: DS.bodyText }}>{deal.loss_reason}</p>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   )
 }

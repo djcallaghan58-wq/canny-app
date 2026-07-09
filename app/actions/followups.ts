@@ -122,6 +122,13 @@ export async function getFollowupData(businessId: string): Promise<FollowupData>
         }
       } else if (p.stage === 'Closed Lost') {
         // Deal's dead - don't keep nagging a lost prospect.
+      } else if (p.status === 'pipeline') {
+        // Has an active deal in the Sales Pipeline now - prospect.stage is
+        // frozen at whatever it was when promoted (never mutated for deal
+        // progression, see app/actions/deals.ts), so it can't be trusted
+        // for follow-up timing anymore. Deal-level follow-up/activity
+        // tracking (Phase 2) owns this instead; outreach follow-ups stand
+        // down here rather than re-nagging someone who already replied.
       } else if (p.stage !== 'New') {
         // Only follow-up on prospects that have been contacted at some point
         if (p.last_outreach_at) {
