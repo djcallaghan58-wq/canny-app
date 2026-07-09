@@ -1,12 +1,8 @@
-import { getBusiness } from '@/app/actions/business'
-import { getWelcomeData } from '@/app/actions/welcome'
-import { WelcomeView } from '@/app/components/welcome-view'
+import { redirect } from 'next/navigation'
 
-export default async function DashboardHome() {
-  const business = await getBusiness()
-  if (!business) return null
-
-  const data = await getWelcomeData(business.id)
-
-  return <WelcomeView business={business} data={data} />
+// Today (app/dashboard/today) is the new default landing page - see chat
+// history. The old welcome dashboard moved to /dashboard/overview and is
+// still reachable from the sidebar, just no longer what you land on.
+export default function DashboardRoot() {
+  redirect('/dashboard/today')
 }

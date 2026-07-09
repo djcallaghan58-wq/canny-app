@@ -1,306 +1,260 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import {
-  UserPlus, FileText, Clock, CheckCircle,
-  AlertTriangle, Bell, Plus, Search, GitBranch,
-} from 'lucide-react'
-import type { Business, Lead } from '@/lib/supabase'
-import type { BriefingData } from '@/app/actions/leads'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { AlertCircle, Clock, Flame, Sparkles, Mail, Loader2 } from 'lucide-react'
+import type { Business, Prospect } from '@/lib/supabase'
+import type { DealWithHealth } from '@/types/deals'
+import type { BriefingActivity, BriefingData } from '@/app/actions/activities'
+import { completeActivity, snoozeActivity } from '@/app/actions/activities'
+import { markDealLost, touchDeal } from '@/app/actions/deals'
+import { markProspectOutreachSent, dismissProspect } from '@/app/actions/prospects'
+import { EmailModal, type DraftEmail } from '@/app/components/prospects-view'
 
-// ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
-  pageBg:      '#F7F9F8',
-  cardBg:      '#FFFFFF',
-  cardBorder:  '#E0EBE5',
-  bodyText:    '#085041',
-  secondary:   '#6B8C7E',
-  muted:       '#9FD4C0',
-  primary:     '#1D9E75',
-  primaryGlow: 'rgba(29,158,117,0.15)',
-  accentLight: '#E1F5EE',
-  accentMid:   '#F0F7F4',
-  outlineBorder:'#C2D6CC',
-  outlineText: '#4A7A6A',
+  pageBg:        '#F7F9F8',
+  cardBg:        '#FFFFFF',
+  cardBorder:    '#E0EBE5',
+  bodyText:      '#085041',
+  secondary:     '#6B8C7E',
+  muted:         '#9FD4C0',
+  primary:       '#1D9E75',
+  accentLight:   '#E1F5EE',
+  inputBg:       '#F7F9F8',
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+type DraftTarget =
+  | { kind: 'activity'; item: BriefingActivity }
+  | { kind: 'rescue'; deal: DealWithHealth }
+  | { kind: 'newProspect'; prospect: Prospect }
 
-function timeAgo(dateStr: string | null): string {
-  if (!dateStr) return 'never'
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const h = Math.floor(diff / 3_600_000)
-  if (h < 1) return 'just now'
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
-}
+// The Daily Briefing - the whole pitch is that every item here resolves in
+// two taps: Draft & Send, Snooze 3d, or Not a fit. No charts, no board to
+// visit. See app/actions/activities.ts for why this deliberately doesn't
+// pre-draft emails via a background cron.
+export function BriefingView({ business, initial }: { business: Business; initial: BriefingData }) {
+  const router = useRouter()
+  const [overdue,      setOverdue]      = useState(initial.overdue)
+  const [dueToday,     setDueToday]     = useState(initial.dueToday)
+  const [rescue,       setRescue]       = useState(initial.rescue)
+  const [newProspects, setNewProspects] = useState(initial.newProspects)
 
-function getGreeting(): string {
-  const h = new Date().getHours()
-  if (h < 12) return 'Good morning'
-  if (h < 17) return 'Good afternoon'
-  return 'Good evening'
-}
+  const [draftTarget, setDraftTarget] = useState<DraftTarget | null>(null)
+  const [draftEmail,  setDraftEmail]  = useState<DraftEmail | null>(null)
+  const [draftLoading, setDraftLoading] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [errorToast, setErrorToast] = useState<string | null>(null)
+  const showError = (msg: string) => { setErrorToast(msg); setTimeout(() => setErrorToast(null), 6000) }
 
-function getDateStr(): string {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
-  })
-}
+  const removeActivity = (id: string) => {
+    setOverdue(prev => prev.filter(a => a.id !== id))
+    setDueToday(prev => prev.filter(a => a.id !== id))
+  }
+  const removeDealEverywhere = (dealId: string) => {
+    setOverdue(prev => prev.filter(a => a.dealId !== dealId))
+    setDueToday(prev => prev.filter(a => a.dealId !== dealId))
+    setRescue(prev => prev.filter(d => d.id !== dealId))
+  }
+  const removeProspect = (id: string) => setNewProspects(prev => prev.filter(p => p.id !== id))
 
-// ── Lead row ──────────────────────────────────────────────────────────────────
+  const draftFor = async (target: DraftTarget) => {
+    setDraftTarget(target); setDraftLoading(true)
+    let payload: Record<string, unknown>
+    let email = ''
+    if (target.kind === 'activity') {
+      payload = { company_name: target.item.companyName, contact_name: target.item.contactName, stage: target.item.stage, value: target.item.value }
+      email = target.item.contactEmail || ''
+    } else if (target.kind === 'rescue') {
+      payload = { company_name: target.deal.company_name, contact_name: target.deal.contact_name, stage: target.deal.stage, value: target.deal.value }
+      email = target.deal.contact_email || ''
+    } else {
+      payload = { ...target.prospect }
+      email = target.prospect.email || target.prospect.email_format || ''
+    }
+    const res = await fetch('/api/prospect/draft-email', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect: payload, business }),
+    })
+    const data = await res.json()
+    if (data.subject) setDraftEmail({ ...data, email })
+    setDraftLoading(false)
+  }
 
-function LeadRow({
-  lead, badgeColor, badgeBg, isLast,
-}: {
-  lead: Lead
-  badgeColor: string
-  badgeBg: string
-  isLast: boolean
-}) {
-  const contactTime = lead.last_contacted_at ?? lead.created_at
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 18px',
-      borderBottom: isLast ? 'none' : `1px solid ${DS.cardBorder}`,
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 13.5, color: DS.bodyText, marginBottom: 2 }}>
-          {lead.customer_name}
-        </div>
-        <div style={{ fontSize: 12, color: DS.secondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {lead.service_type || 'General service'}
-          {lead.value > 0 ? ` · $${Number(lead.value).toLocaleString()}` : ''}
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }} className="lead-row-meta">
-        <span style={{ fontSize: 11, fontWeight: 600, color: badgeColor, background: badgeBg, padding: '2px 8px', borderRadius: 5 }}>
-          {timeAgo(contactTime)}
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 500, color: DS.secondary, background: DS.accentMid, padding: '2px 8px', borderRadius: 5, border: `1px solid ${DS.cardBorder}` }}>
-          {lead.stage}
-        </span>
-        <Link href="/dashboard/pipeline" style={{ fontSize: 12, fontWeight: 600, color: DS.primary, textDecoration: 'none' }}>
-          View →
-        </Link>
-      </div>
+  const onSent = async () => {
+    if (!draftTarget) return
+    if (draftTarget.kind === 'activity') {
+      await completeActivity(draftTarget.item.id, business.id)
+      removeActivity(draftTarget.item.id)
+    } else if (draftTarget.kind === 'rescue') {
+      await touchDeal(draftTarget.deal.id, business.id)
+      setRescue(prev => prev.filter(d => d.id !== draftTarget.deal.id))
+    } else {
+      const result = await markProspectOutreachSent(draftTarget.prospect.id, business.id)
+      if (!result.success) showError(`Couldn't mark ${draftTarget.prospect.company_name} contacted`)
+      removeProspect(draftTarget.prospect.id)
+    }
+  }
+
+  const snooze = async (item: BriefingActivity) => {
+    setBusyId(item.id)
+    const result = await snoozeActivity(item.id, business.id, 3)
+    if (result.success) removeActivity(item.id)
+    else showError(`Couldn't snooze ${item.companyName}: ${result.error ?? 'unknown error'}`)
+    setBusyId(null)
+  }
+
+  const notAFitDeal = async (dealId: string, companyName: string) => {
+    setBusyId(dealId)
+    const result = await markDealLost(dealId, business.id, 'not_a_fit')
+    if (result.success) removeDealEverywhere(dealId)
+    else showError(`Couldn't update ${companyName}: ${result.error ?? 'unknown error'}`)
+    setBusyId(null)
+  }
+
+  const notAFitProspect = async (p: Prospect) => {
+    setBusyId(p.id)
+    const result = await dismissProspect(p.id, 'not_a_fit')
+    if (result.success) removeProspect(p.id)
+    else showError(`Couldn't dismiss ${p.company_name}`)
+    setBusyId(null)
+  }
+
+  const openCoach = (companyName: string, stage: string, contactName?: string | null) => {
+    const prompt = `Help me with this deal:\nCompany: ${companyName}\n${contactName ? `Contact: ${contactName}\n` : ''}Stage: ${stage}\n\nWhat's my best next move?`
+    router.push(`/dashboard/agent?prompt=${encodeURIComponent(prompt)}`)
+  }
+
+  const btn: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 4, padding: '6px 11px',
+    borderRadius: 6, border: `1px solid ${DS.cardBorder}`, background: DS.inputBg,
+    cursor: 'pointer', color: DS.secondary, fontSize: 11, fontWeight: 600,
+    fontFamily: 'inherit', whiteSpace: 'nowrap', transition: 'all 0.15s',
+  }
+  const sendBtn: React.CSSProperties = { ...btn, border: `1px solid ${DS.primary}`, color: DS.primary, background: DS.accentLight }
+  const lbl = (icon: React.ReactNode, title: string, count: number, color: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+      {icon}
+      <span style={{ fontSize: 13, fontWeight: 700, color: DS.bodyText }}>{title}</span>
+      <span style={{ fontSize: 10, fontWeight: 700, color, background: `${color}18`, padding: '1px 8px', borderRadius: 20 }}>{count}</span>
     </div>
   )
-}
 
-// ── Briefing view ─────────────────────────────────────────────────────────────
+  const row = (
+    key: string,
+    company: string,
+    subtitle: string,
+    actions: React.ReactNode,
+  ) => (
+    <div key={key} style={{ background: DS.cardBg, border: `1px solid ${DS.cardBorder}`, borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: DS.bodyText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{company}</p>
+        <p style={{ fontSize: 11.5, color: DS.secondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</p>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>{actions}</div>
+    </div>
+  )
 
-export function BriefingView({ business, data }: { business: Business; data: BriefingData }) {
-  const [greeting, setGreeting] = useState('Good morning')
-  const [dateStr,  setDateStr]  = useState('')
-
-  useEffect(() => {
-    setGreeting(getGreeting())
-    setDateStr(getDateStr())
-  }, [])
-
-  const stats = [
-    {
-      label: 'Leads Today',
-      value: data.leadsToday,
-      sub:   'added in last 24h',
-      icon:  UserPlus,
-      color: DS.primary,
-      bg:    DS.accentLight,
-    },
-    {
-      label: 'Quotes Pending',
-      value: data.quotesPending,
-      sub:   'awaiting decisions',
-      icon:  FileText,
-      color: '#F59E0B',
-      bg:    'rgba(245,158,11,0.12)',
-    },
-    {
-      label: 'Follow-Ups Due',
-      value: data.followUpsDue,
-      sub:   'no contact in 3+ days',
-      icon:  Clock,
-      color: data.followUpsDue > 0 ? '#DC2626' : DS.muted,
-      bg:    data.followUpsDue > 0 ? 'rgba(220,38,38,0.09)' : DS.accentMid,
-    },
-    {
-      label: 'Booked This Week',
-      value: data.bookedThisWeek,
-      sub:   'confirmed jobs',
-      icon:  CheckCircle,
-      color: DS.primary,
-      bg:    DS.accentLight,
-    },
-  ]
-
-  const card: React.CSSProperties = {
-    background:   DS.cardBg,
-    border:       `1px solid ${DS.cardBorder}`,
-    borderRadius: 10,
-    overflow:     'hidden',
-    boxShadow:    '0 1px 3px rgba(0,0,0,0.05)',
-  }
+  const noneOpen = overdue.length === 0 && dueToday.length === 0 && rescue.length === 0 && newProspects.length === 0
 
   return (
     <>
-      <style>{`
-        .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-        @media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 480px) { .stat-grid { grid-template-columns: 1fr 1fr; } }
-        .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
-        .action-btn {
-          display: flex; align-items: center; gap: 7px;
-          padding: 9px 18px; border-radius: 6px;
-          font-size: 12px; font-weight: 600; text-decoration: none;
-          min-height: 36px; transition: opacity 0.15s, transform 0.15s;
-          font-family: inherit; cursor: pointer; white-space: nowrap; border: none;
-        }
-        .action-btn:hover { opacity: 0.88; transform: translateY(-1px); }
-        @media (max-width: 560px) { .lead-row-meta { display: none !important; } }
-      `}</style>
+      <div style={{ padding: '16px 24px', flexShrink: 0, borderBottom: `1px solid ${DS.cardBorder}`, background: DS.cardBg }}>
+        <p style={{ fontSize: 10.5, fontWeight: 600, color: DS.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 2 }}>{business.name}</p>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.4px', marginBottom: 6 }}>Today</h1>
+        <p style={{ fontSize: 13, color: DS.secondary }}>{initial.summary}</p>
+      </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
-        <div style={{ padding: '28px 28px 44px', maxWidth: 960, margin: '0 auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px 40px', scrollbarWidth: 'thin', scrollbarColor: `${DS.muted} transparent`, background: DS.pageBg }}>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-          {/* ── Header ── */}
-          <div style={{ marginBottom: 28 }}>
-            <p style={{ fontSize: 10.5, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>
-              {dateStr || 'Daily Briefing'}
-            </p>
-            <h1 style={{ fontSize: 26, fontWeight: 700, color: DS.bodyText, letterSpacing: '-0.6px', lineHeight: 1.15, marginBottom: 4 }}>
-              {greeting}, {business.name}
-            </h1>
-            <p style={{ fontSize: 14, color: DS.secondary }}>
-              Here's what needs your attention today.
-            </p>
+        {noneOpen && (
+          <div style={{ border: `2px dashed ${DS.cardBorder}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: DS.bodyText, marginBottom: 5 }}>All clear</p>
+            <p style={{ fontSize: 12.5, color: DS.secondary }}>Nothing overdue, nothing cooling off, no new prospects waiting. Check back tomorrow.</p>
           </div>
+        )}
 
-          {/* ── Stat cards ── */}
-          <div className="stat-grid" style={{ marginBottom: 28 }}>
-            {stats.map(({ label, value, sub, icon: Icon, color, bg }) => (
-              <div key={label} style={{
-                background:   DS.cardBg,
-                border:       `1px solid ${DS.cardBorder}`,
-                borderRadius: 10,
-                padding:      '16px 18px',
-                boxShadow:    '0 1px 3px rgba(0,0,0,0.05)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 600, color: DS.secondary }}>{label}</span>
-                  <div style={{ width: 28, height: 28, borderRadius: 7, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon size={14} color={color} />
-                  </div>
-                </div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: DS.bodyText, letterSpacing: '-1.5px', lineHeight: 1 }}>
-                  {value}
-                </div>
-                <div style={{ fontSize: 11, color: DS.muted, marginTop: 6 }}>{sub}</div>
-              </div>
+        {overdue.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            {lbl(<AlertCircle size={14} color="#DC2626" />, 'Overdue', overdue.length, '#DC2626')}
+            {overdue.map(item => row(item.id, item.companyName,
+              `${item.contactName ? item.contactName + ' · ' : ''}${item.stage} · due ${new Date(item.dueAt).toLocaleDateString()}`,
+              <>
+                <button onClick={() => draftFor({ kind: 'activity', item })} disabled={draftLoading && draftTarget?.kind === 'activity' && draftTarget.item.id === item.id} style={sendBtn}>
+                  {draftLoading && draftTarget?.kind === 'activity' && draftTarget.item.id === item.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={11} />} Draft &amp; Send
+                </button>
+                <button onClick={() => snooze(item)} disabled={busyId === item.id} style={btn}>Snooze 3d</button>
+                <button onClick={() => notAFitDeal(item.dealId, item.companyName)} disabled={busyId === item.dealId} style={{ ...btn, color: '#DC2626' }}>Not a fit</button>
+              </>,
             ))}
           </div>
+        )}
 
-          {/* ── Urgent section ── */}
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <AlertTriangle size={13} color="#DC2626" />
-              <span style={{ fontSize: 13, fontWeight: 700, color: DS.bodyText }}>
-                Urgent — No response in 24+ hours
-              </span>
-              {data.urgentLeads.length > 0 && (
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: '#DC2626', background: 'rgba(220,38,38,0.1)', padding: '1px 7px', borderRadius: 20 }}>
-                  {data.urgentLeads.length}
-                </span>
-              )}
-            </div>
-            <div style={card}>
-              {data.urgentLeads.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: DS.muted, fontSize: 13.5 }}>
-                  ✓ No urgent leads — you're on top of it!
-                </div>
-              ) : (
-                data.urgentLeads.map((lead, i) => (
-                  <LeadRow
-                    key={lead.id}
-                    lead={lead}
-                    badgeColor="#DC2626"
-                    badgeBg="rgba(220,38,38,0.1)"
-                    isLast={i === data.urgentLeads.length - 1}
-                  />
-                ))
-              )}
-            </div>
+        {dueToday.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            {lbl(<Clock size={14} color="#D97706" />, 'Due today', dueToday.length, '#D97706')}
+            {dueToday.map(item => row(item.id, item.companyName,
+              `${item.contactName ? item.contactName + ' · ' : ''}${item.stage}`,
+              <>
+                <button onClick={() => draftFor({ kind: 'activity', item })} disabled={draftLoading && draftTarget?.kind === 'activity' && draftTarget.item.id === item.id} style={sendBtn}>
+                  {draftLoading && draftTarget?.kind === 'activity' && draftTarget.item.id === item.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={11} />} Draft &amp; Send
+                </button>
+                <button onClick={() => snooze(item)} disabled={busyId === item.id} style={btn}>Snooze 3d</button>
+                <button onClick={() => notAFitDeal(item.dealId, item.companyName)} disabled={busyId === item.dealId} style={{ ...btn, color: '#DC2626' }}>Not a fit</button>
+              </>,
+            ))}
           </div>
+        )}
 
-          {/* ── Attention section ── */}
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <Bell size={13} color="#F59E0B" />
-              <span style={{ fontSize: 13, fontWeight: 700, color: DS.bodyText }}>
-                Attention — Quotes with no follow-up in 3+ days
-              </span>
-              {data.attentionLeads.length > 0 && (
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.12)', padding: '1px 7px', borderRadius: 20 }}>
-                  {data.attentionLeads.length}
-                </span>
-              )}
-            </div>
-            <div style={card}>
-              {data.attentionLeads.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: DS.muted, fontSize: 13.5 }}>
-                  ✓ All quotes are being followed up on time.
-                </div>
-              ) : (
-                data.attentionLeads.map((lead, i) => (
-                  <LeadRow
-                    key={lead.id}
-                    lead={lead}
-                    badgeColor="#F59E0B"
-                    badgeBg="rgba(245,158,11,0.12)"
-                    isLast={i === data.attentionLeads.length - 1}
-                  />
-                ))
-              )}
-            </div>
+        {rescue.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            {lbl(<Flame size={14} color="#D97706" />, 'Rescue - going cold', rescue.length, '#D97706')}
+            {rescue.map(d => {
+              const daysSilent = Math.floor((Date.now() - new Date(d.last_activity_at).getTime()) / 86400000)
+              return row(d.id, d.company_name,
+                `${d.contact_name ? d.contact_name + ' · ' : ''}${d.stage} · quiet ${daysSilent}d`,
+                <>
+                  <button onClick={() => draftFor({ kind: 'rescue', deal: d })} disabled={draftLoading && draftTarget?.kind === 'rescue' && draftTarget.deal.id === d.id} style={sendBtn}>
+                    {draftLoading && draftTarget?.kind === 'rescue' && draftTarget.deal.id === d.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={11} />} Draft &amp; Send
+                  </button>
+                  <button onClick={() => openCoach(d.company_name, d.stage, d.contact_name)} style={btn}>Coach</button>
+                  <button onClick={() => notAFitDeal(d.id, d.company_name)} disabled={busyId === d.id} style={{ ...btn, color: '#DC2626' }}>Not a fit</button>
+                </>,
+              )
+            })}
           </div>
+        )}
 
-          {/* ── Quick actions ── */}
-          <div>
-            <p style={{ fontSize: 10.5, fontWeight: 600, color: DS.muted, letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 12 }}>
-              Quick Actions
-            </p>
-            <div className="action-row">
-              <Link
-                href="/dashboard/pipeline"
-                className="action-btn"
-                style={{ background: DS.primary, color: 'white', boxShadow: `0 2px 10px ${DS.primaryGlow}` }}
-              >
-                <Plus size={14} />
-                New Lead
-              </Link>
-              <Link
-                href="/dashboard/prospects"
-                className="action-btn"
-                style={{ background: DS.cardBg, color: DS.outlineText, border: `1.5px solid ${DS.outlineBorder}`, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
-              >
-                <Search size={14} />
-                Find Prospects
-              </Link>
-              <Link
-                href="/dashboard/pipeline"
-                className="action-btn"
-                style={{ background: DS.cardBg, color: DS.outlineText, border: `1.5px solid ${DS.outlineBorder}`, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
-              >
-                <GitBranch size={14} />
-                Open Pipeline
-              </Link>
-            </div>
+        {newProspects.length > 0 && (
+          <div style={{ marginBottom: 22 }}>
+            {lbl(<Sparkles size={14} color={DS.primary} />, 'New prospects to reach out to', newProspects.length, DS.primary)}
+            {newProspects.map(p => row(p.id, p.company_name,
+              `${p.contact_name || 'No contact yet'}${p.contact_title ? ' · ' + p.contact_title : ''}`,
+              <>
+                <button onClick={() => draftFor({ kind: 'newProspect', prospect: p })} disabled={draftLoading && draftTarget?.kind === 'newProspect' && draftTarget.prospect.id === p.id} style={sendBtn}>
+                  {draftLoading && draftTarget?.kind === 'newProspect' && draftTarget.prospect.id === p.id ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Mail size={11} />} Draft &amp; Send
+                </button>
+                <button onClick={() => notAFitProspect(p)} disabled={busyId === p.id} style={{ ...btn, color: '#DC2626' }}>Not a fit</button>
+              </>,
+            ))}
           </div>
-
-        </div>
+        )}
       </div>
+
+      {errorToast && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, background: '#DC2626', color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, boxShadow: '0 4px 16px rgba(0,0,0,0.2)', zIndex: 1000, maxWidth: 360 }}>
+          {errorToast}
+        </div>
+      )}
+
+      {draftEmail && (
+        <EmailModal
+          email={draftEmail}
+          businessId={business.id}
+          onClose={() => { setDraftEmail(null); setDraftTarget(null) }}
+          onOpen={() => { void onSent() }}
+        />
+      )}
     </>
   )
 }

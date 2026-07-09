@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { UserButton } from '@clerk/nextjs'
 import {
-  LayoutDashboard, Search, GitBranch, List, FileText, Bot, BarChart2, Settings, Menu, X,
+  Sun, LayoutDashboard, Search, GitBranch, List, FileText, Bot, BarChart2, Settings, Menu, X,
 } from 'lucide-react'
 import type { Business } from '@/lib/supabase'
 
@@ -32,7 +32,8 @@ const DS = {
 type NavEntry = { href: string; label: string; icon: React.ElementType }
 
 const NAV_MAIN: NavEntry[] = [
-  { href: '/dashboard',           label: 'Dashboard',     icon: LayoutDashboard },
+  { href: '/dashboard/today',     label: 'Today',         icon: Sun       },
+  { href: '/dashboard/overview',  label: 'Overview',      icon: LayoutDashboard },
   { href: '/dashboard/prospects', label: 'Prospecting',   icon: Search    },
   { href: '/dashboard/pipeline',  label: 'Pipeline',      icon: GitBranch },
   { href: '/dashboard/prospects', label: 'My Lists',      icon: List      },

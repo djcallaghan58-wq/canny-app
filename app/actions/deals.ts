@@ -164,6 +164,18 @@ async function scheduleAutoFollowup(
   return dueAt
 }
 
+// Closing a deal (won or lost) shouldn't leave a stale "follow up on X"
+// reminder sitting open forever - clear any open activities for it.
+async function closeOpenActivities(
+  supabase: ReturnType<typeof createAdminClient>, dealId: string,
+): Promise<void> {
+  await supabase
+    .from('activities')
+    .update({ completed_at: new Date().toISOString(), notes: 'Auto-completed: deal closed' })
+    .eq('deal_id', dealId)
+    .is('completed_at', null)
+}
+
 export async function updateDealStage(
   id: string,
   businessId: string,
@@ -190,12 +202,14 @@ export async function updateDealStage(
 
     const patch: Record<string, unknown> = { stage, last_activity_at: now, updated_at: now }
     if (nextActivityAt) patch.next_activity_at = nextActivityAt
-    if (stage === 'Closed Won') { patch.won_at = now; patch.value = value }
-    if (stage === 'Closed Lost') patch.lost_at = now
+    if (stage === 'Closed Won') { patch.won_at = now; patch.value = value; patch.next_activity_at = null }
+    if (stage === 'Closed Lost') { patch.lost_at = now; patch.next_activity_at = null }
 
     const { data: deal, error } = await supabase
       .from('deals').update(patch).eq('id', id).eq('business_id', businessId).select().single()
     if (error) return { success: false, error: error.message }
+
+    if (stage === 'Closed Won' || stage === 'Closed Lost') await closeOpenActivities(supabase, id)
 
     await supabase.from('timeline_events').insert({
       deal_id: id, business_id: businessId, type: stage === 'Closed Won' ? 'deal_won' : 'stage_change',
@@ -203,6 +217,7 @@ export async function updateDealStage(
     })
 
     revalidatePath('/dashboard/pipeline')
+    revalidatePath('/dashboard/today')
     return { success: true, deal: deal as Deal }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
@@ -225,10 +240,12 @@ export async function markDealLost(
     const now = new Date().toISOString()
     const { data: deal, error } = await supabase
       .from('deals')
-      .update({ stage: 'Closed Lost', lost_at: now, loss_reason: lossReason, last_activity_at: now, updated_at: now })
+      .update({ stage: 'Closed Lost', lost_at: now, loss_reason: lossReason, last_activity_at: now, next_activity_at: null, updated_at: now })
       .eq('id', id).eq('business_id', businessId)
       .select().single()
     if (error) return { success: false, error: error.message }
+
+    await closeOpenActivities(supabase, id)
 
     await supabase.from('timeline_events').insert({
       deal_id: id, business_id: businessId, type: 'deal_lost',
@@ -236,6 +253,7 @@ export async function markDealLost(
     })
 
     revalidatePath('/dashboard/pipeline')
+    revalidatePath('/dashboard/today')
     return { success: true, deal: deal as Deal }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
