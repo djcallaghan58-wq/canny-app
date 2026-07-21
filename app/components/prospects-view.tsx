@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import type { Business, Prospect, ProspectStage, ProspectSearch } from '@/lib/supabase'
 import {
-  createProspect, updateProspectStage, updateProspect, importProspects,
+  createProspect, updateProspect, importProspects,
   saveProspectFromSearch, checkRecentSearch, saveSearch,
   markProspectOutreachSent, getProspects, dismissProspect,
 } from '@/app/actions/prospects'
@@ -342,10 +342,16 @@ export function ProspectDetail({
     setSavingNotes(false)
   }
 
-  const changeStage = async (s: ProspectStage) => {
-    setStage(s)
-    await updateProspectStage(prospect.id, s)
-    onUpdate({ ...prospect, notes, stage: s })
+  const [loggingOutreach, setLoggingOutreach] = useState(false)
+
+  const logOutreach = async () => {
+    setLoggingOutreach(true)
+    const result = await markProspectOutreachSent(prospect.id, business.id)
+    if (result.success && result.stage) {
+      setStage(result.stage)
+      onUpdate({ ...prospect, notes, stage: result.stage, last_outreach_at: result.lastOutreachAt ?? prospect.last_outreach_at })
+    }
+    setLoggingOutreach(false)
   }
 
   const generateFollowUp = async () => {
@@ -432,27 +438,46 @@ export function ProspectDetail({
 
           <div style={{ marginBottom: 18 }}>
             <p style={lbl}>Stage</p>
-            {/* Only New/Contacted are selectable here - this panel only ever
-                opens for prospects still in Outreach (status !== 'pipeline').
+            {/* Stage is read-only here. New -> Contacted only ever happens
+                via markProspectOutreachSent (email send flow, or "Log
+                outreach" below) so last_outreach_at stays trustworthy.
                 Replied+ is a deal, created exclusively via "Mark Replied" in
-                the Outreach list, never by clicking a pill. */}
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                the Outreach list. No path in this panel writes stage
+                directly - see prospects.ts markProspectOutreachSent. */}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
               {OUTREACH_STAGES.map(s => {
                 const st     = STAGE_STYLE[s]
                 const active = s === stage
+                if (!active) return null
                 return (
-                  <button key={s} onClick={() => changeStage(s)} style={{
+                  <span key={s} style={{
                     padding: '3px 11px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                    border: `1.5px solid ${active ? st.color : DS.cardBorder}`,
-                    background: active ? st.bg : 'transparent',
-                    color: active ? st.color : DS.secondary,
-                    cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+                    border: `1.5px solid ${st.color}`,
+                    background: st.bg, color: st.color,
                   }}>
                     {s}
-                  </button>
+                  </span>
                 )
               })}
+              {stage === 'New' && (
+                <button onClick={logOutreach} disabled={loggingOutreach} style={{
+                  padding: '3px 11px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  border: `1.5px solid ${DS.cardBorder}`, background: 'transparent',
+                  color: DS.secondary, cursor: loggingOutreach ? 'default' : 'pointer',
+                  fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  {loggingOutreach && <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />}
+                  Log outreach (call / DM / other)
+                </button>
+              )}
             </div>
+            {stage === 'Contacted' && (
+              <p style={{ fontSize: 11, color: DS.secondary, marginTop: 6 }}>
+                {prospect.last_outreach_at
+                  ? `Last outreach ${new Date(prospect.last_outreach_at).toLocaleDateString()}. Waiting on a reply.`
+                  : 'Waiting on a reply.'}
+              </p>
+            )}
             {PIPELINE_STAGES.includes(stage) && (
               <p style={{ fontSize: 11, color: DS.secondary, marginTop: 6 }}>
                 This prospect has replied and is now tracked as a deal in the Pipeline.
