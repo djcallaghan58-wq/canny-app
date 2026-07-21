@@ -24,10 +24,15 @@ export async function resolveBusinessForUser(userId: string): Promise<BusinessRe
     const orgIds = memberships.data.map((m: { organization: { id: string } }) => m.organization.id)
     if (orgIds.length === 0) return null
 
+    // .limit(1) before .maybeSingle() so this can't throw if an org ever
+    // ends up with more than one business row again (it shouldn't after the
+    // Jul 21 merge, but this is the query that broke silently when it did).
     const { data: bizByOrg } = await supabase
       .from('businesses')
       .select('id, org_id')
       .in('org_id', orgIds)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
 
     return bizByOrg ?? null

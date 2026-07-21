@@ -39,6 +39,8 @@ export async function getBusiness(): Promise<Business | null> {
       .from('businesses')
       .select('*')
       .in('org_id', orgIds)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
 
     return bizByOrg ?? null
@@ -72,6 +74,8 @@ export async function getBusinessOrError(): Promise<{ business: Business | null;
       .from('businesses')
       .select('*')
       .in('org_id', orgIds)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
 
     if (orgErr) return { business: null, fetchError: true }
@@ -104,6 +108,36 @@ export async function createBusiness(input: {
 
   try {
     const supabase = createAdminClient()
+
+    // Guard against duplicate businesses: if this user already belongs to a
+    // Clerk org that has a business, join that one instead of creating a
+    // second one. This is the exact bug that produced 3 separate "Evans
+    // Custom Apparel" business rows in production - onboarding always
+    // created a new owner_id-scoped business even when the signing-in user
+    // was already a member of an org with an existing business (e.g. signed
+    // up standalone before being added to the team's org). See chat history
+    // (Jul 21 merge) for the cleanup this required.
+    try {
+      const clerk = await clerkClient()
+      const memberships = await clerk.users.getOrganizationMembershipList({ userId, limit: 10 })
+      const orgIds = memberships.data.map((m: { organization: { id: string } }) => m.organization.id)
+      if (orgIds.length > 0) {
+        const { data: existing } = await supabase
+          .from('businesses')
+          .select('id')
+          .in('org_id', orgIds)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+        if (existing) {
+          revalidatePath('/dashboard')
+          return { success: true }
+        }
+      }
+    } catch {
+      // Non-critical - fall through to normal create path
+    }
+
     const { error } = await supabase
       .from('businesses')
       .upsert({
